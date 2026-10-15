@@ -1,0 +1,87 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Intuime.Views.ComposerWindow"
+        Title="Intuime"
+        Width="1440"
+        Height="900"
+        MinWidth="1100"
+        MinHeight="700"
+        WindowState="Maximized"
+        Background="#0E1218"
+        FontFamily="Inter"
+        KeyDown="OnKeyDown">
+  <DockPanel>
+    <Border DockPanel.Dock="Top" Background="#121820" BorderBrush="#2A3544" BorderThickness="0,0,0,1" Padding="12,8">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="10">
+          <Border Width="28" Height="28" CornerRadius="7" Background="#E7A23A">
+            <TextBlock Text="In" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#1A1204" FontWeight="Bold" FontSize="13" />
+          </Border>
+          <TextBlock Text="Intuime" VerticalAlignment="Center" FontSize="18" FontWeight="SemiBold" Foreground="#E7EEF6" />
+          <StackPanel x:Name="MenuHost" Orientation="Horizontal" Spacing="4" />
+        </StackPanel>
+        <TextBlock x:Name="TitleLabel" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="#8EA0B5" />
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+          <Button Classes="tool" Content="Preview" Click="OnPreview" />
+          <Button Classes="accent" Content="Play" Click="OnPlay" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Height="30" Background="#10151C" BorderBrush="#2A3544" BorderThickness="0,1,0,0" Padding="12,0">
+      <TextBlock x:Name="StatusLabel" VerticalAlignment="Center" Foreground="#8EA0B5" FontSize="12" />
+    </Border>
+
+    <Grid ColumnDefinitions="292,*,340">
+      <Border Grid.Column="0" Background="#121820" BorderBrush="#2A3544" BorderThickness="0,0,1,0">
+        <Grid RowDefinitions="Auto,Auto,*,Auto,*" Margin="12">
+          <TextBlock Text="SCENES" Classes="section" />
+          <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="6" Margin="0,8,0,8">
+            <Button Classes="tool" Content="Add" Click="OnAddScene" />
+            <Button Classes="tool" Content="Duplicate" Click="OnDuplicateScene" />
+            <Button Classes="tool" Content="Delete" Click="OnDeleteScene" />
+          </StackPanel>
+          <ListBox x:Name="SceneList" Grid.Row="2" Background="Transparent" />
+          <TextBlock Grid.Row="3" Text="INSERT" Classes="section" Margin="0,12,0,8" />
+          <ScrollViewer Grid.Row="4">
+            <WrapPanel x:Name="InsertPanel" />
+          </ScrollViewer>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Column="1" RowDefinitions="Auto,*,196">
+        <Border Background="#10151C" BorderBrush="#2A3544" BorderThickness="0,0,0,1" Padding="8,6">
+          <WrapPanel x:Name="ToolBar" />
+        </Border>
+        <ScrollViewer x:Name="Viewport" Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#0B0E13">
+          <Panel x:Name="StageHost" Margin="48" />
+        </ScrollViewer>
+        <Border Grid.Row="2" Background="#121820" BorderBrush="#2A3544" BorderThickness="0,1,0,0">
+          <DockPanel Margin="8">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,6">
+              <TextBlock Text="LAYERS" Classes="section" VerticalAlignment="Center" />
+              <Button Classes="tool" Content="Up" Click="OnLayerUp" />
+              <Button Classes="tool" Content="Down" Click="OnLayerDown" />
+              <Button Classes="tool" Content="Front" Click="OnBringFront" />
+              <Button Classes="tool" Content="Back" Click="OnSendBack" />
+            </StackPanel>
+            <ListBox x:Name="LayerList" Background="Transparent" />
+          </DockPanel>
+        </Border>
+      </Grid>
+
+      <Border Grid.Column="2" Background="#121820" BorderBrush="#2A3544" BorderThickness="1,0,0,0">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="6" Margin="12,10,12,8">
+            <Button x:Name="TabProperties" Classes="tool" Content="Properties" Click="OnTabProperties" />
+            <Button x:Name="TabInteract" Classes="tool" Content="Interactions" Click="OnTabInteract" />
+            <Button x:Name="TabData" Classes="tool" Content="Variables" Click="OnTabData" />
+          </StackPanel>
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <ContentControl x:Name="InspectorHost" Margin="12,0,12,16" />
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>
