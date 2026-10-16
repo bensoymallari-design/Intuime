@@ -409,7 +409,9 @@ public sealed class EditorSession
         {
             foreach (var action in interaction.Actions)
             {
-                if (!string.IsNullOrEmpty(action.TargetId) && map.TryGetValue(action.TargetId, out var next))
+                if (PlayBarTargets.TryGetVideoId(action.TargetId, out var videoId) && map.TryGetValue(videoId, out var remapped))
+                    action.TargetId = PlayBarTargets.For(remapped);
+                else if (!string.IsNullOrEmpty(action.TargetId) && map.TryGetValue(action.TargetId, out var next))
                     action.TargetId = next;
             }
         }

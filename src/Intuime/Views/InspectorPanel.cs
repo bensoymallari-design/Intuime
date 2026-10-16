@@ -148,7 +148,10 @@ public sealed class InspectorPanel : StackPanel
             Check("Loop", element.Loop, value => element.Loop = value);
         }
         if (element.Kind == ElementKind.Video)
+        {
             Check("Play bar", element.ShowControls, value => element.ShowControls = value);
+            Note($"Turn this off to start with the bar hidden. In Show, Hide, or Toggle, choose \"{element.Name} play bar\" to reveal it on the video, including the time.");
+        }
         if (element.Kind == ElementKind.WebLink)
             Text("URL", element.Url, value => element.Url = value);
         if (element.Kind == ElementKind.Clock)
@@ -370,11 +373,23 @@ public sealed class InspectorPanel : StackPanel
     private Control ElementChoice(ExperienceAction action, SceneElement? context)
     {
         var elements = _session?.ActiveScene?.Elements ?? new List<SceneElement>();
-        var ids = new[] { "" }.Concat(elements.Select(element => element.Id)).ToArray();
-        return ChoiceControl("Element", ids, action.TargetId, id =>
+        var includeBars = action.Kind is ActionKind.Show or ActionKind.Hide or ActionKind.ToggleVisibility;
+        var ids = new List<string> { "" };
+        foreach (var element in elements)
+        {
+            ids.Add(element.Id);
+            if (includeBars && element.Kind == ElementKind.Video)
+                ids.Add(PlayBarTargets.For(element.Id));
+        }
+        return ChoiceControl("Element", ids.ToArray(), action.TargetId, id =>
         {
             if (string.IsNullOrEmpty(id))
                 return context == null ? "Choose an element" : "The element that was touched";
+            if (PlayBarTargets.TryGetVideoId(id, out var videoId))
+            {
+                var name = elements.FirstOrDefault(element => element.Id == videoId)?.Name ?? "Video";
+                return name + " play bar";
+            }
             return elements.FirstOrDefault(element => element.Id == id)?.Name ?? id;
         }, value =>
         {
