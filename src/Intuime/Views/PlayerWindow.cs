@@ -183,19 +183,15 @@ public sealed class PlayerWindow : Window
                         candidate => OverlayOwner(candidate) == videoId);
                     host.Foreground.Rebuild();
                     host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
-                    var layer = new Grid
+                    var foregroundHost = new LayoutTransformControl
                     {
-                        Children =
-                        {
-                            new LayoutTransformControl
-                            {
-                                LayoutTransform = host.ForegroundScale,
-                                HorizontalAlignment = HorizontalAlignment.Left,
-                                VerticalAlignment = VerticalAlignment.Top,
-                                Child = host.Foreground
-                            }
-                        }
+                        LayoutTransform = host.ForegroundScale,
+                        HorizontalAlignment = HorizontalAlignment.Left,
+                        VerticalAlignment = VerticalAlignment.Top,
+                        Child = host.Foreground,
+                        ZIndex = 0
                     };
+                    var layer = new Grid { Children = { foregroundHost } };
                     if (host.ShowControls)
                         layer.Children.Add(BuildPlayBar(host));
                     view = new VideoView { MediaPlayer = player, Content = layer };
@@ -294,7 +290,9 @@ public sealed class PlayerWindow : Window
             Text = "Ready",
             Foreground = Brushes.White,
             VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 13
+            FontSize = 13,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxWidth = 280
         };
         var slider = new Slider { Minimum = 0, Maximum = 1000, VerticalAlignment = VerticalAlignment.Center };
         slider.AddHandler(PointerPressedEvent, (_, _) => host.Scrubbing = true, RoutingStrategies.Tunnel);
@@ -331,39 +329,35 @@ public sealed class PlayerWindow : Window
         host.Readout = readout;
         host.Slider = slider;
         host.FrameBox = frame;
+        var times = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children = { toggle, readout }
+        };
+        var seek = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,72"),
+            ColumnSpacing = 8,
+            Margin = new Thickness(0, 6, 0, 0)
+        };
+        seek.Children.Add(slider);
+        Grid.SetColumn(frame, 1);
+        seek.Children.Add(frame);
+        var stack = new StackPanel();
+        stack.Children.Add(times);
+        stack.Children.Add(seek);
         return new Border
         {
             VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(12, 0, 12, 12),
-            Padding = new Thickness(10, 8),
+            Margin = new Thickness(8, 0, 8, 8),
+            Padding = new Thickness(8),
             CornerRadius = new CornerRadius(10),
-            Background = Painting.Brush("#CC101820"),
-            Child = new Grid
-            {
-                ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto,72"),
-                ColumnSpacing = 10,
-                Children =
-                {
-                    toggle,
-                    readout,
-                    At(slider, 2),
-                    At(new TextBlock
-                    {
-                        Text = "Frame",
-                        Foreground = Brushes.White,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        FontSize = 13
-                    }, 3),
-                    At(frame, 4)
-                }
-            }
+            Background = Painting.Brush("#F0101820"),
+            ZIndex = 20,
+            IsHitTestVisible = true,
+            Child = stack
         };
-    }
-
-    private static Control At(Control control, int column)
-    {
-        Grid.SetColumn(control, column);
-        return control;
     }
 
     private void OnEnded(Host host)
