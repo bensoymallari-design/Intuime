@@ -464,11 +464,11 @@ public class ExperienceTests
         engine.PointerUp(live.Id);
         Assert.Equal(1, live.EffectScale);
 
-        now = now.AddMilliseconds(210);
+        now = now.AddMilliseconds(260);
         engine.Tick();
-        Assert.True(live.EffectScale > 1.05);
+        Assert.True(live.EffectScale > 1.15);
 
-        now = now.AddMilliseconds(210);
+        now = now.AddMilliseconds(260);
         engine.Tick();
         Assert.Equal(1, live.EffectScale);
         Assert.Equal(0, live.EffectShiftX);
@@ -491,7 +491,7 @@ public class ExperienceTests
         engine.Start();
         var live = engine.Current!.Elements.Single();
         engine.PointerUp(live.Id);
-        now = now.AddMilliseconds(40);
+        now = now.AddMilliseconds(35);
         engine.Tick();
         Assert.True(Math.Abs(live.EffectShiftX) > 8);
 
@@ -525,12 +525,12 @@ public class ExperienceTests
         engine.PointerUp(button.Id);
         Assert.Equal("only", engine.Current!.Id);
         var live = engine.Current.Elements.Single();
-        now = now.AddMilliseconds(320);
+        now = now.AddMilliseconds(490);
         engine.Tick();
         Assert.Equal("only", engine.Current.Id);
-        Assert.True(live.EffectShiftY < -10);
+        Assert.True(live.EffectShiftY < -80);
 
-        now = now.AddMilliseconds(320);
+        now = now.AddMilliseconds(490);
         engine.Tick();
         Assert.Equal("next", engine.Current.Id);
     }
@@ -561,11 +561,11 @@ public class ExperienceTests
         engine.Start();
         engine.PointerUp(button.Id);
         Assert.Equal("only", engine.Current!.Id);
-        now = now.AddMilliseconds(210);
+        now = now.AddMilliseconds(260);
         engine.Tick();
         Assert.Equal("only", engine.Current.Id);
-        Assert.True(engine.Current.Elements.Single().EffectOpacity < 0.5);
-        now = now.AddMilliseconds(210);
+        Assert.True(engine.Current.Elements.Single().EffectOpacity < 0.4);
+        now = now.AddMilliseconds(260);
         engine.Tick();
         Assert.Equal("next", engine.Current.Id);
     }
