@@ -62,7 +62,8 @@ public static class InsertDesigns
     {
         var clearFill = string.IsNullOrWhiteSpace(element.Fill) || element.Fill == "#00000000";
         var clearStroke = element.StrokeThickness <= 0 || element.Stroke == "#00000000";
-        var circle = kind == ElementKind.Ellipse || element.CornerRadius >= Math.Min(element.Width, element.Height) / 2;
+        var circle = kind == ElementKind.Ellipse || (kind == ElementKind.Image && Math.Abs(element.Width - element.Height) < 2 && element.CornerRadius >= element.Width / 2);
+        var outline = !clearStroke || kind == ElementKind.Hotspot;
         var plate = new Border
         {
             Width = circle ? 46 : 108,
@@ -77,8 +78,8 @@ public static class InsertDesigns
                 VerticalAlignment = VerticalAlignment.Center,
                 CornerRadius = new CornerRadius(circle ? 14 : Math.Clamp(element.CornerRadius, 0, 14)),
                 Background = Painting.Brush(clearFill ? "#00000000" : element.Fill),
-                BorderBrush = Painting.Brush(!clearStroke ? element.Stroke : kind == ElementKind.Hotspot || clearFill ? "#E7A23A" : "#00000000"),
-                BorderThickness = new Thickness(!clearStroke || kind == ElementKind.Hotspot || clearFill ? 1.5 : 0),
+                BorderBrush = Painting.Brush(outline ? (clearStroke ? "#E7A23A" : element.Stroke) : "#00000000"),
+                BorderThickness = new Thickness(outline ? 1.5 : 0),
                 BoxShadow = element.HasShadow ? BoxShadows.Parse("0 4 10 0 #55000000") : default,
                 Child = ShowsWords(kind) ? new TextBlock
                 {
