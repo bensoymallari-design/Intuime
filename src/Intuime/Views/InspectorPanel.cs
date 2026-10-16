@@ -23,6 +23,10 @@ public sealed class InspectorPanel : StackPanel
         Spacing = 10;
     }
 
+    public Control? PinnedEffect { get; private set; }
+    public event Action? PinnedEffectChanged;
+    public event Action<string, string>? PreviewEffect;
+
     public void Show(EditorSession session, string tab)
     {
         _session = session;
@@ -36,12 +40,14 @@ public sealed class InspectorPanel : StackPanel
             return;
         _building = true;
         Children.Clear();
+        PinnedEffect = null;
         if (_tab == "variables")
             BuildVariables();
         else if (_tab == "interactions")
             BuildInteractions();
         else
             BuildProperties();
+        PinnedEffectChanged?.Invoke();
         Dispatcher.UIThread.Post(() => _building = false, DispatcherPriority.Background);
     }
 
@@ -102,6 +108,7 @@ public sealed class InspectorPanel : StackPanel
 
         Heading(element.Name);
         Note(Labels.Element(element.Kind));
+        PinnedEffect = TapEffectPin(element);
         Text("Name", element.Name, value => element.Name = string.IsNullOrWhiteSpace(value) ? element.Name : value.Trim(), structure: true);
         Number("X", element.X, value => element.X = value);
         Number("Y", element.Y, value => element.Y = value);
@@ -166,15 +173,29 @@ public sealed class InspectorPanel : StackPanel
             Number("Max", element.Max, value => element.Max = value);
         }
         Check("Shadow", element.HasShadow, value => element.HasShadow = value);
+    }
+
+    private Control TapEffectPin(SceneElement element)
+    {
         var effectNames = new[] { "None" }.Concat(TapEffects.All).ToArray();
         var currentEffect = TapEffects.All.FirstOrDefault(name =>
             string.Equals(name, element.TapEffect, StringComparison.OrdinalIgnoreCase)) ?? "None";
-        Children.Add(ChoiceControl("Tap effect", effectNames, currentEffect, value => value, value =>
+        var panel = new StackPanel { Spacing = 4, Margin = new Avalonia.Thickness(12, 0, 12, 8) };
+        panel.Children.Add(ChoiceControl("When tapped", effectNames, currentEffect, value => value, value =>
         {
             element.TapEffect = value == "None" ? "" : value;
             _session?.Commit();
+            if (TapEffects.Known(element.TapEffect))
+                PreviewEffect?.Invoke(element.Id, element.TapEffect);
         }));
-        Note("Plays when someone taps this in Play. If that tap opens another scene, the effect finishes first.");
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Pick Pop, Bounce, Shake, or another motion. The button plays it here, and again when someone taps it in Play.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Painting.Brush(Painting.Muted),
+            FontSize = 12
+        });
+        return panel;
     }
 
     private void BuildInteractions()
