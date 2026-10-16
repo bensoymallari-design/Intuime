@@ -1,0 +1,12 @@
+Intuime plays video and audio with LibVLC via LibVLCSharp.
+
+LibVLC and LibVLCSharp are licensed under the GNU Lesser General Public License
+version 2.1 or later. The Windows build script downloads VideoLAN.LibVLC.Windows
+and copies those libraries next to Intuime.exe. You may replace the LibVLC
+binaries with a compatible build under the terms of the LGPL.
+
+Source: https://code.videolan.org/videolan/LibVLCSharp
+        https://www.videolan.org/vlc/libvlc.html
+
+Avalonia UI is licensed under the MIT License.
+https://github.com/AvaloniaUI/Avalonia
