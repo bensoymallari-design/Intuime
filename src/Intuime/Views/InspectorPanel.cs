@@ -166,6 +166,15 @@ public sealed class InspectorPanel : StackPanel
             Number("Max", element.Max, value => element.Max = value);
         }
         Check("Shadow", element.HasShadow, value => element.HasShadow = value);
+        var effectNames = new[] { "None" }.Concat(TapEffects.All).ToArray();
+        var currentEffect = TapEffects.All.FirstOrDefault(name =>
+            string.Equals(name, element.TapEffect, StringComparison.OrdinalIgnoreCase)) ?? "None";
+        Children.Add(ChoiceControl("Tap effect", effectNames, currentEffect, value => value, value =>
+        {
+            element.TapEffect = value == "None" ? "" : value;
+            _session?.Commit();
+        }));
+        Note("Plays when someone taps this in Play. If that tap opens another scene, the effect finishes first.");
     }
 
     private void BuildInteractions()
@@ -265,6 +274,8 @@ public sealed class InspectorPanel : StackPanel
         panel.Children.Add(ChoiceControl("Do", Enum.GetValues<ActionKind>(), action.Kind, Labels.Action, value =>
         {
             action.Kind = value;
+            if (value == ActionKind.PlayEffect && !TapEffects.Known(action.Text))
+                action.Text = "Pop";
             CommitAndRefresh();
         }));
         switch (action.Kind)
@@ -286,6 +297,23 @@ public sealed class InspectorPanel : StackPanel
             case ActionKind.PauseMedia:
             case ActionKind.StopMedia:
                 panel.Children.Add(ElementChoice(action, context));
+                break;
+            case ActionKind.PlayEffect:
+                panel.Children.Add(ElementChoice(action, context));
+                var effect = TapEffects.All.FirstOrDefault(name =>
+                    string.Equals(name, action.Text, StringComparison.OrdinalIgnoreCase)) ?? "Pop";
+                panel.Children.Add(ChoiceControl("Effect", TapEffects.All, effect, value => value, value =>
+                {
+                    action.Text = value;
+                    _session?.TouchLive();
+                }));
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "Leave the element on “the element that was touched” to use the one they tapped. If Go to scene is the next action, that scene waits until the effect finishes.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Painting.Brush(Painting.Muted),
+                    FontSize = 12
+                });
                 break;
         }
         if (action.Kind is ActionKind.SetText or ActionKind.OpenUrl or ActionKind.SetBackground or ActionKind.SetFill)

@@ -7,10 +7,16 @@ public sealed class PlaybackEngine
     private readonly Dictionary<string, DateTime> _timerArmed = new();
     private readonly HashSet<string> _timerOnce = new();
     private readonly List<Tween> _tweens = new();
+    private readonly List<RunningEffect> _effects = new();
     private string? _lastTapId;
     private DateTime _lastTapAt;
     private int _depth;
     private int _epoch;
+    private int _deferDepth;
+    private bool _dropActiveSequence;
+    private DeferredNav _deferredNav;
+    private string? _deferredSceneId;
+    private bool _deferredLeave;
 
     public PlaybackEngine(ExperienceDocument original, Func<DateTime>? clock = null)
     {
@@ -41,7 +47,7 @@ public sealed class PlaybackEngine
     public void Tick()
     {
         var now = _clock();
-        var animated = AdvanceTweens(now);
+        var animated = AdvanceTweens(now) || AdvanceEffects(now);
         var waited = false;
         foreach (var sequence in _sequences.ToList())
         {
@@ -100,13 +106,27 @@ public sealed class PlaybackEngine
         if (element == null || !element.IsVisible)
             return;
         NotifyActivity();
-        Run(element.Interactions, TriggerKind.Release, element, null);
-        Run(element.Interactions, TriggerKind.Tap, element, null);
-        var now = _clock();
-        if (_lastTapId == elementId && (now - _lastTapAt).TotalMilliseconds <= 400)
-            Run(element.Interactions, TriggerKind.DoubleTap, element, null);
-        _lastTapId = elementId;
-        _lastTapAt = now;
+        var holdNavigation = TapEffects.Known(element.TapEffect);
+        if (holdNavigation)
+        {
+            StartEffect(element, element.TapEffect);
+            _deferDepth++;
+        }
+        try
+        {
+            Run(element.Interactions, TriggerKind.Release, element, null);
+            Run(element.Interactions, TriggerKind.Tap, element, null);
+            var now = _clock();
+            if (_lastTapId == elementId && (now - _lastTapAt).TotalMilliseconds <= 400)
+                Run(element.Interactions, TriggerKind.DoubleTap, element, null);
+            _lastTapId = elementId;
+            _lastTapAt = now;
+        }
+        finally
+        {
+            if (holdNavigation)
+                _deferDepth--;
+        }
         Changed?.Invoke();
     }
 
@@ -170,6 +190,14 @@ public sealed class PlaybackEngine
 
     private void Enter(string sceneId, bool runLeave)
     {
+        if (HoldNavigation())
+        {
+            _deferredNav = DeferredNav.Enter;
+            _deferredSceneId = sceneId;
+            _deferredLeave = runLeave;
+            _dropActiveSequence = true;
+            return;
+        }
         if (_depth > 8)
             return;
         _epoch++;
@@ -185,6 +213,7 @@ public sealed class PlaybackEngine
         ArmTimers(Current);
         _sequences.Clear();
         _tweens.Clear();
+        _effects.Clear();
         SceneJustRaised = true;
         SceneChanged?.Invoke();
 
@@ -302,7 +331,8 @@ public sealed class PlaybackEngine
         ActionKind.Show or ActionKind.Hide or ActionKind.ToggleVisibility or ActionKind.SetText
         or ActionKind.SetOpacity or ActionKind.MoveTo or ActionKind.Resize
         or ActionKind.BringToFront or ActionKind.SendToBack or ActionKind.SetFill
-        or ActionKind.PlayMedia or ActionKind.PauseMedia or ActionKind.StopMedia;
+        or ActionKind.PlayMedia or ActionKind.PauseMedia or ActionKind.StopMedia
+        or ActionKind.PlayEffect;
 
     private void Pump(ActionSequence sequence)
     {
@@ -324,7 +354,20 @@ public sealed class PlaybackEngine
                     return;
                 }
                 if (Apply(action))
+                {
+                    if (_dropActiveSequence)
+                    {
+                        sequence.Actions.Clear();
+                        _sequences.Remove(sequence);
+                        _dropActiveSequence = false;
+                    }
                     return;
+                }
+                if (action.Kind == ActionKind.PlayEffect && sequence.Actions.Count > 0 && TapEffects.Known(action.Text))
+                {
+                    sequence.WaitUntil = _clock().AddMilliseconds(TapEffects.DurationMs(action.Text));
+                    return;
+                }
             }
             if (epoch == _epoch && sequence.Actions.Count == 0 && sequence.WaitUntil == null)
                 _sequences.Remove(sequence);
@@ -387,6 +430,7 @@ public sealed class PlaybackEngine
             case ActionKind.PlayMedia:
             case ActionKind.PauseMedia:
             case ActionKind.StopMedia:
+            case ActionKind.PlayEffect:
                 ApplyElement(action);
                 return false;
             default:
@@ -459,6 +503,64 @@ public sealed class PlaybackEngine
                 element.IsPlaying = false;
                 MediaCommand?.Invoke(new MediaRequest(element.Id, MediaTransport.Stop));
                 break;
+            case ActionKind.PlayEffect:
+                StartEffect(element, action.Text);
+                break;
+        }
+    }
+
+    private void StartEffect(SceneElement element, string? name)
+    {
+        if (!TapEffects.Known(name))
+            return;
+        _effects.RemoveAll(effect => effect.Element.Id == element.Id);
+        _effects.Add(new RunningEffect(element, name!.Trim(), _clock(), TapEffects.DurationMs(name!)));
+    }
+
+    private bool AdvanceEffects(DateTime now)
+    {
+        if (_effects.Count == 0)
+            return false;
+        foreach (var effect in _effects.ToList())
+        {
+            var t = (now - effect.Start).TotalMilliseconds / effect.DurationMs;
+            if (t >= 1)
+            {
+                TapEffects.Reset(effect.Element);
+                _effects.Remove(effect);
+                continue;
+            }
+            TapEffects.Apply(effect.Element, effect.Name, t);
+        }
+        ReleaseDeferredNavigation();
+        return true;
+    }
+
+    private bool HoldNavigation() => _deferDepth > 0 && _deferredNav == DeferredNav.None;
+
+    private void ReleaseDeferredNavigation()
+    {
+        if (_effects.Count > 0 || _deferredNav == DeferredNav.None)
+            return;
+        var kind = _deferredNav;
+        var sceneId = _deferredSceneId;
+        var leave = _deferredLeave;
+        _deferredNav = DeferredNav.None;
+        _deferredSceneId = null;
+        switch (kind)
+        {
+            case DeferredNav.Enter when !string.IsNullOrEmpty(sceneId):
+                Enter(sceneId, leave);
+                break;
+            case DeferredNav.Next:
+                MoveScene(1);
+                break;
+            case DeferredNav.Previous:
+                MoveScene(-1);
+                break;
+            case DeferredNav.Restart:
+                Restart();
+                break;
         }
     }
 
@@ -520,6 +622,12 @@ public sealed class PlaybackEngine
 
     private void MoveScene(int delta)
     {
+        if (HoldNavigation())
+        {
+            _deferredNav = delta < 0 ? DeferredNav.Previous : DeferredNav.Next;
+            _dropActiveSequence = true;
+            return;
+        }
         if (Current == null || Live.Scenes.Count == 0)
             return;
         var index = Live.Scenes.FindIndex(s => s.Id == Current.Id);
@@ -533,6 +641,12 @@ public sealed class PlaybackEngine
 
     private void Restart()
     {
+        if (HoldNavigation())
+        {
+            _deferredNav = DeferredNav.Restart;
+            _dropActiveSequence = true;
+            return;
+        }
         var start = Original.StartSceneId ?? Original.Scenes.FirstOrDefault()?.Id;
         Live.Variables = ProjectStore.Clone(Original).Variables;
         if (!string.IsNullOrEmpty(start))
@@ -574,5 +688,16 @@ public sealed class PlaybackEngine
         public bool AnimateX, AnimateY, AnimateWidth, AnimateHeight, AnimateOpacity;
         public DateTime Start;
         public int DurationMs;
+    }
+
+    private sealed record RunningEffect(SceneElement Element, string Name, DateTime Start, int DurationMs);
+
+    private enum DeferredNav
+    {
+        None,
+        Enter,
+        Next,
+        Previous,
+        Restart
     }
 }

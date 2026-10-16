@@ -705,9 +705,16 @@ public sealed class SceneSurface : UserControl
         Canvas.SetTop(node.Root, element.Y - _originY);
         node.Root.Width = Math.Max(8, element.Width);
         node.Root.Height = Math.Max(8, element.Height);
-        node.Root.RenderTransform = new RotateTransform(element.Rotation, element.Width / 2, element.Height / 2);
+        var scale = Math.Max(0.01, element.EffectScale);
+        var motion = new TransformGroup();
+        motion.Children.Add(new ScaleTransform(scale, scale));
+        motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
+        motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
+        node.Root.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+        node.Root.RenderTransform = motion;
         var hidden = !element.IsVisible;
-        node.Root.Opacity = hidden ? (_design ? Math.Min(element.Opacity, 0.35) : 0) : element.Opacity;
+        var opacity = Math.Clamp(element.Opacity * element.EffectOpacity, 0, 1);
+        node.Root.Opacity = hidden ? (_design ? Math.Min(element.Opacity, 0.35) : 0) : opacity;
         node.Root.IsHitTestVisible = _design || (element.IsVisible && ElementFactory.CapturesPointer(element));
         if (!_design && element.IsVisible && ElementFactory.CapturesPointer(element))
             node.Root.Cursor = new Cursor(StandardCursorType.Hand);
@@ -722,7 +729,7 @@ public sealed class SceneSurface : UserControl
         }
         if (node.Chrome == null)
             return;
-        var fill = element.Fill;
+        var fill = element.EffectFill ?? element.Fill;
         if (_design && element.Kind == ElementKind.Hotspot)
             fill = "#33E7A23A";
         node.Chrome.Background = Painting.Brush(fill, "#00000000");
@@ -745,7 +752,7 @@ public sealed class SceneSurface : UserControl
 
     private static void ApplyShape(Ellipse shape, SceneElement element)
     {
-        shape.Fill = Painting.Brush(element.Fill, "#E7A23A");
+        shape.Fill = Painting.Brush(element.EffectFill ?? element.Fill, "#E7A23A");
         shape.Stroke = Painting.Brush(element.Stroke, "#00000000");
         shape.StrokeThickness = element.StrokeThickness;
         shape.Opacity = 1;
