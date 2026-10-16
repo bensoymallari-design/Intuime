@@ -334,4 +334,22 @@ public class ExperienceTests
         Assert.True(ElementFactory.CapturesPointer(ElementFactory.Create(ElementKind.Hotspot, 0, 0, 0, 1)));
         Assert.False(ElementFactory.CapturesPointer(ElementFactory.Create(ElementKind.Rectangle, 0, 0, 0, 1)));
     }
+
+    [Fact]
+    public void Text_in_front_of_a_video_is_drawn_on_that_video()
+    {
+        var video = ElementFactory.Create(ElementKind.Video, 0, 0, 1, 1);
+        video.Width = 800;
+        video.Height = 450;
+        var caption = ElementFactory.Create(ElementKind.Text, 40, 40, 2, 2);
+        caption.Text = "X";
+        var behind = ElementFactory.Create(ElementKind.Text, 40, 200, 0, 3);
+        var outside = ElementFactory.Create(ElementKind.Text, 2000, 40, 5, 4);
+        var elements = new List<SceneElement> { video, caption, behind, outside };
+
+        Assert.Equal(video.Id, LayoutMath.VideoOverlayOwner(elements, caption));
+        Assert.Null(LayoutMath.VideoOverlayOwner(elements, behind));
+        Assert.Null(LayoutMath.VideoOverlayOwner(elements, outside));
+        Assert.Null(LayoutMath.VideoOverlayOwner(elements, video));
+    }
 }

@@ -170,12 +170,31 @@ public sealed class PlayerWindow : Window
                     Volume = 80
                 };
                 VideoView? view = null;
+                SceneSurface? foreground = null;
+                ScaleTransform? foregroundScale = null;
                 if (element.Kind == ElementKind.Video)
                 {
-                    view = new VideoView { MediaPlayer = player };
+                    var videoId = element.Id;
+                    foreground = new SceneSurface();
+                    foreground.UsePlayback(_engine, _assetRoot);
+                    foreground.UseOverlay(element.X, element.Y, element.Width, element.Height,
+                        candidate => OverlayOwner(candidate) == videoId);
+                    foreground.Rebuild();
+                    foregroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
+                    view = new VideoView
+                    {
+                        MediaPlayer = player,
+                        Content = new LayoutTransformControl
+                        {
+                            LayoutTransform = foregroundScale,
+                            HorizontalAlignment = HorizontalAlignment.Left,
+                            VerticalAlignment = VerticalAlignment.Top,
+                            Child = foreground
+                        }
+                    };
                     _overlay.Children.Add(view);
                 }
-                _hosts[element.Id] = new Host(player, view);
+                _hosts[element.Id] = new Host(player, view, foreground, foregroundScale);
             }
             catch (Exception ex)
             {
@@ -238,7 +257,20 @@ public sealed class PlayerWindow : Window
             Canvas.SetTop(host.View, originY + element.Y * scale);
             host.View.Width = Math.Max(1, element.Width * scale);
             host.View.Height = Math.Max(1, element.Height * scale);
+            if (host.ForegroundScale != null)
+            {
+                host.ForegroundScale.ScaleX = scale;
+                host.ForegroundScale.ScaleY = scale;
+            }
+            host.Foreground?.MoveOverlay(element.X, element.Y, element.Width, element.Height);
+            host.Foreground?.Sync();
         }
+    }
+
+    private string? OverlayOwner(SceneElement candidate)
+    {
+        var scene = _engine.Current;
+        return scene == null ? null : LayoutMath.VideoOverlayOwner(scene.Elements, candidate);
     }
 
     private void ShowStatus(string message)
@@ -284,7 +316,10 @@ public sealed class PlayerWindow : Window
             try
             {
                 if (host.View != null)
+                {
+                    host.View.Content = null;
                     host.View.MediaPlayer = null;
+                }
                 host.Player.Stop();
                 host.Player.Dispose();
             }
@@ -296,5 +331,5 @@ public sealed class PlayerWindow : Window
         _overlay.Children.Clear();
     }
 
-    private sealed record Host(MediaPlayer Player, VideoView? View);
+    private sealed record Host(MediaPlayer Player, VideoView? View, SceneSurface? Foreground, ScaleTransform? ForegroundScale);
 }
