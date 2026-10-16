@@ -95,7 +95,7 @@ public partial class ComposerWindow : Window
             ("Duplicate    Ctrl+D", () => _session.DuplicateSelection()),
             ("Delete", () => _session.DeleteSelection()),
             ("Select all    Ctrl+A", () => _session.SelectAll()));
-        Menu("Insert", ElementFactory.Catalog.Select(item => (item.Label, (Action)(() => _session.AddElement(item.Kind)))).ToArray());
+        BuildInsertMenu();
         Menu("Arrange",
             ("Align left", () => _session.Align("left")),
             ("Align center", () => _session.Align("center")),
@@ -114,6 +114,19 @@ public partial class ComposerWindow : Window
             ("Shortcuts", () => _ = Shortcuts()),
             ("About Intuime", () => _ = Dialogs.Alert(this, "Intuime",
                 "Intuime composes touchscreen experiences. Design scenes, wire taps and timers, then play them full screen. It follows the same idea as Intuiface: a visual composer plus a player.")));
+    }
+
+    private void BuildInsertMenu()
+    {
+        var button = new Button { Content = "Insert", Classes = { "tool" } };
+        var flyout = new MenuFlyout();
+        foreach (var item in ElementFactory.Catalog)
+        {
+            var kind = item.Kind;
+            flyout.Items.Add(InsertDesigns.KindMenu(kind, item.Label, preset => _session.AddElement(kind, preset)));
+        }
+        button.Flyout = flyout;
+        MenuHost.Children.Add(button);
     }
 
     private void Menu(string header, params (string Label, Action Action)[] items)
@@ -175,9 +188,10 @@ public partial class ComposerWindow : Window
                 Margin = new Avalonia.Thickness(0, 0, 6, 6),
                 Width = 124
             };
-            ToolTip.SetTip(button, item.Blurb);
+            ToolTip.SetTip(button, item.Blurb + "  ·  hover for designs");
             var kind = item.Kind;
             button.Click += (_, _) => _session.AddElement(kind);
+            InsertDesigns.ShowOnHover(button, kind, preset => _session.AddElement(kind, preset));
             InsertPanel.Children.Add(button);
         }
     }

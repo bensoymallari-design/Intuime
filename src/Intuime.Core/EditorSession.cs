@@ -99,12 +99,18 @@ public sealed class EditorSession
         DocumentChanged?.Invoke();
     }
 
-    public SceneElement AddElement(ElementKind kind)
+    public SceneElement AddElement(ElementKind kind) => AddElement(kind, null);
+
+    public SceneElement AddElement(ElementKind kind, ElementPreset? preset)
     {
         var scene = RequireScene();
         var index = scene.Elements.Count(e => e.Kind == kind) + 1;
         var stagger = scene.Elements.Count % 6;
-        var element = ElementFactory.Create(kind, 80 + stagger * 28, 80 + stagger * 28, NextZ(scene), index);
+        var element = preset == null
+            ? ElementFactory.Create(kind, 80 + stagger * 28, 80 + stagger * 28, NextZ(scene), index)
+            : ElementPresets.Create(kind, preset, 80 + stagger * 28, 80 + stagger * 28, NextZ(scene), index);
+        if (preset != null)
+            element.Name = UniqueName(scene, preset.Name);
         scene.Elements.Add(element);
         SelectOnly(element);
         Commit(structure: true);
@@ -381,6 +387,16 @@ public sealed class EditorSession
 
     private static int NextZ(Scene scene) =>
         scene.Elements.Count == 0 ? 0 : scene.Elements.Max(e => e.Z) + 1;
+
+    private static string UniqueName(Scene scene, string name)
+    {
+        if (scene.Elements.All(element => element.Name != name))
+            return name;
+        var number = 2;
+        while (scene.Elements.Any(element => element.Name == $"{name} {number}"))
+            number++;
+        return $"{name} {number}";
+    }
 
     private static List<SceneElement> CloneElements(IEnumerable<SceneElement> source, double dx, double dy)
     {

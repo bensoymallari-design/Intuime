@@ -417,4 +417,31 @@ public class ExperienceTests
         Assert.Equal(PlayBarTargets.For(copy.Id), copy.Interactions[0].Actions[0].TargetId);
         Assert.NotEqual(PlayBarTargets.For(video.Id), copy.Interactions[0].Actions[0].TargetId);
     }
+
+    [Fact]
+    public void Insert_designs_cover_every_kind_and_can_be_placed()
+    {
+        foreach (var item in ElementFactory.Catalog)
+        {
+            var presets = ElementPresets.For(item.Kind);
+            Assert.True(presets.Count >= 4);
+            var signatures = presets.Select(preset =>
+            {
+                var element = ElementFactory.Create(item.Kind, 0, 0, 0, 1);
+                preset.Apply(element);
+                return $"{element.Fill}|{element.Foreground}|{element.Text}|{element.Width}|{element.CornerRadius}|{element.FontSize}";
+            }).Distinct().ToList();
+            Assert.True(signatures.Count >= 3);
+        }
+
+        var session = new EditorSession();
+        session.Load(SampleExperiences.CreateBlank("Draft", 800, 600), null, "", markClean: true);
+        var amber = ElementPresets.For(ElementKind.Button).First(preset => preset.Name == "Amber");
+        var placed = session.AddElement(ElementKind.Button, amber);
+        Assert.Equal("Amber", placed.Name);
+        Assert.Equal("Continue", placed.Text);
+        Assert.Equal("#E7A23A", placed.Fill);
+        var again = session.AddElement(ElementKind.Button, amber);
+        Assert.Equal("Amber 2", again.Name);
+    }
 }
