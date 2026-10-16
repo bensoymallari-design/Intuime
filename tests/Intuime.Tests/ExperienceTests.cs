@@ -364,4 +364,57 @@ public class ExperienceTests
         Assert.True(clone.Loop);
         Assert.False(clone.ShowControls);
     }
+
+    [Fact]
+    public void Tapping_a_video_can_show_its_hidden_play_bar()
+    {
+        var video = ElementFactory.Create(ElementKind.Video, 0, 0, 0, 1);
+        video.Name = "Video 1";
+        video.ShowControls = false;
+        video.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.Show, TargetId = PlayBarTargets.For(video.Id) } }
+        });
+        var scene = new Scene { Id = "film", Name = "Film", Elements = { video } };
+        var document = new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } };
+        var engine = new PlaybackEngine(document);
+        engine.Start();
+        var live = engine.Current!.Elements.Single();
+        Assert.False(live.ShowControls);
+
+        engine.PointerUp(live.Id);
+        Assert.True(live.ShowControls);
+        Assert.True(live.IsVisible);
+
+        engine.RunExternal(new ExperienceAction { Kind = ActionKind.Hide, TargetId = PlayBarTargets.For(live.Id) });
+        Assert.False(live.ShowControls);
+        engine.RunExternal(new ExperienceAction { Kind = ActionKind.ToggleVisibility, TargetId = PlayBarTargets.For(live.Id) });
+        Assert.True(live.ShowControls);
+
+        live.ShowControls = false;
+        live.IsVisible = false;
+        engine.RunExternal(new ExperienceAction { Kind = ActionKind.Show, TargetId = live.Id });
+        Assert.True(live.IsVisible);
+        Assert.False(live.ShowControls);
+    }
+
+    [Fact]
+    public void Duplicating_a_video_keeps_the_play_bar_target()
+    {
+        var session = new EditorSession();
+        session.Load(SampleExperiences.CreateBlank("Draft", 800, 600), null, "", markClean: true);
+        var video = session.AddElement(ElementKind.Video);
+        video.Name = "Video 1";
+        video.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.Show, TargetId = PlayBarTargets.For(video.Id) } }
+        });
+        session.SetSelection(new[] { video });
+        session.DuplicateSelection();
+        var copy = session.Selection.Single();
+        Assert.Equal(PlayBarTargets.For(copy.Id), copy.Interactions[0].Actions[0].TargetId);
+        Assert.NotEqual(PlayBarTargets.For(video.Id), copy.Interactions[0].Actions[0].TargetId);
+    }
 }

@@ -170,7 +170,7 @@ public sealed class PlayerWindow : Window
                     EnableMouseInput = false,
                     Volume = 80
                 };
-                var host = new Host(player, element.Loop, element.Kind == ElementKind.Video && element.ShowControls);
+                var host = new Host(player, element.Loop) { ElementId = element.Id };
                 player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
                 player.Playing += (_, _) => Dispatcher.UIThread.Post(() => OnPlaying(host));
                 VideoView? view = null;
@@ -180,7 +180,7 @@ public sealed class PlayerWindow : Window
                     host.Foreground = new SceneSurface();
                     host.Foreground.UsePlayback(_engine, _assetRoot);
                     host.Foreground.UseOverlay(element.X, element.Y, element.Width, element.Height,
-                        candidate => OverlayOwner(candidate) == videoId);
+                        candidate => OverlayOwner(candidate) == videoId, videoId);
                     host.Foreground.Rebuild();
                     host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
                     var foregroundHost = new LayoutTransformControl
@@ -191,9 +191,10 @@ public sealed class PlayerWindow : Window
                         Child = host.Foreground,
                         ZIndex = 0
                     };
-                    var layer = new Grid { Children = { foregroundHost } };
-                    if (host.ShowControls)
-                        layer.Children.Add(BuildPlayBar(host));
+                    host.Bar = BuildPlayBar(host);
+                    host.Bar.IsVisible = element.ShowControls;
+                    host.Bar.IsHitTestVisible = element.ShowControls;
+                    var layer = new Grid { Children = { foregroundHost, host.Bar } };
                     view = new VideoView { MediaPlayer = player, Content = layer };
                     host.View = view;
                     _overlay.Children.Add(view);
@@ -270,10 +271,16 @@ public sealed class PlayerWindow : Window
             }
             host.Foreground?.MoveOverlay(element.X, element.Y, element.Width, element.Height);
             host.Foreground?.Sync();
+            if (host.Bar != null)
+            {
+                var showBar = element.IsVisible && element.ShowControls;
+                host.Bar.IsVisible = showBar;
+                host.Bar.IsHitTestVisible = showBar;
+            }
         }
     }
 
-    private Control BuildPlayBar(Host host)
+    private Border BuildPlayBar(Host host)
     {
         var toggle = new Button
         {
@@ -386,11 +393,8 @@ public sealed class PlayerWindow : Window
 
     private void TogglePlayback(Host host)
     {
-        if (string.IsNullOrEmpty(host.Path))
-        {
-            ShowStatus("Choose a video file first.");
+        if (!EnsureSource(host))
             return;
-        }
         if (host.Ended || host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error)
         {
             StartMedia(host);
@@ -428,8 +432,33 @@ public sealed class PlayerWindow : Window
         SeekAndPause(host, (long)(Math.Max(0, frame) / fps * 1000.0));
     }
 
+    private bool EnsureSource(Host host)
+    {
+        if (!string.IsNullOrEmpty(host.Path) && File.Exists(host.Path))
+            return true;
+        var element = string.IsNullOrEmpty(host.ElementId)
+            ? null
+            : _engine.Current?.Elements.FirstOrDefault(item => item.Id == host.ElementId);
+        if (element == null || string.IsNullOrWhiteSpace(element.Source))
+        {
+            ShowStatus("Choose a video file first.");
+            return false;
+        }
+        var path = ProjectStore.Resolve(_assetRoot, element.Source);
+        if (!File.Exists(path))
+        {
+            ShowStatus("Missing media file: " + element.Source);
+            return false;
+        }
+        host.Path = path;
+        host.Loop = element.Loop;
+        return true;
+    }
+
     private void SeekAndPause(Host host, long milliseconds)
     {
+        if (!EnsureSource(host))
+            return;
         milliseconds = Math.Max(0, milliseconds);
         host.Ended = false;
         if (host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error || host.Player.Media == null)
@@ -476,9 +505,10 @@ public sealed class PlayerWindow : Window
         var label = ended ? "Ended" : state == VLCState.Playing ? "Playing" : state == VLCState.Paused ? "Paused" : "Ready";
         var fps = host.Fps > 1 ? host.Fps : 0;
         var frame = fps > 1 && time >= 0 ? (int)Math.Round(time / 1000.0 * fps) : 0;
-        host.Readout.Text = length > 0
-            ? $"{label}   {Clock(time)} / {Clock(length)}" + (fps > 1 ? $"   frame {frame}" : "")
-            : label;
+        var clock = length > 0
+            ? $"{Clock(time)} / {Clock(length)}" + (fps > 1 ? $"   frame {frame}" : "")
+            : $"{Clock(Math.Max(0, time))} / 0:00";
+        host.Readout.Text = $"{label}   {clock}";
         if (!host.Scrubbing && length > 0)
             host.Slider.Value = Math.Clamp(time / (double)length * host.Slider.Maximum, 0, host.Slider.Maximum);
         if (!host.FrameEditing && fps > 1 && host.FrameBox != null)
@@ -561,20 +591,20 @@ public sealed class PlayerWindow : Window
 
     private sealed class Host
     {
-        public Host(MediaPlayer player, bool loop, bool showControls)
+        public Host(MediaPlayer player, bool loop)
         {
             Player = player;
             Loop = loop;
-            ShowControls = showControls;
         }
 
         public MediaPlayer Player { get; }
         public VideoView? View { get; set; }
         public SceneSurface? Foreground { get; set; }
         public ScaleTransform? ForegroundScale { get; set; }
+        public Border? Bar { get; set; }
+        public string ElementId { get; set; } = "";
         public string Path { get; set; } = "";
         public bool Loop { get; set; }
-        public bool ShowControls { get; }
         public bool Scrubbing { get; set; }
         public bool FrameEditing { get; set; }
         public bool Ended { get; set; }

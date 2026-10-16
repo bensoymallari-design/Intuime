@@ -396,6 +396,21 @@ public sealed class PlaybackEngine
 
     private void ApplyElement(ExperienceAction action)
     {
+        if (PlayBarTargets.TryGetVideoId(action.TargetId, out var videoId) &&
+            action.Kind is ActionKind.Show or ActionKind.Hide or ActionKind.ToggleVisibility)
+        {
+            var video = Find(videoId);
+            if (video == null || video.Kind != ElementKind.Video)
+                return;
+            video.ShowControls = action.Kind switch
+            {
+                ActionKind.Show => true,
+                ActionKind.Hide => false,
+                _ => !video.ShowControls
+            };
+            return;
+        }
+
         var element = Find(action.TargetId);
         if (element == null || Current == null)
             return;

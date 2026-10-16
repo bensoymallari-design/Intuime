@@ -39,6 +39,7 @@ public sealed class SceneSurface : UserControl
     private double? _clipWidth;
     private double? _clipHeight;
     private Func<SceneElement, bool>? _include;
+    private string? _backgroundElementId;
 
     public SceneSurface()
     {
@@ -80,13 +81,14 @@ public sealed class SceneSurface : UserControl
         _assetRoot = assetRoot;
     }
 
-    public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include)
+    public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include, string? backgroundElementId = null)
     {
         _originX = originX;
         _originY = originY;
         _clipWidth = Math.Max(1, width);
         _clipHeight = Math.Max(1, height);
         _include = include;
+        _backgroundElementId = backgroundElementId;
         _clearPage = true;
         Background = Brushes.Transparent;
     }
@@ -526,6 +528,8 @@ public sealed class SceneSurface : UserControl
             return;
         if (!_design)
         {
+            if (!string.IsNullOrEmpty(_backgroundElementId))
+                _engine?.PointerDown(_backgroundElementId);
             _gesture = Gesture.Background(e.GetPosition(_canvas));
             e.Pointer.Capture(_canvas);
             return;
@@ -589,7 +593,12 @@ public sealed class SceneSurface : UserControl
         if (!_design)
         {
             if (gesture.Kind == GestureKind.Background)
-                _engine?.BackgroundTap();
+            {
+                if (!string.IsNullOrEmpty(_backgroundElementId))
+                    _engine?.PointerUp(_backgroundElementId);
+                else
+                    _engine?.BackgroundTap();
+            }
             return;
         }
 

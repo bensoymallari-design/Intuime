@@ -165,6 +165,27 @@ public sealed class ExperienceAction
 
 public readonly record struct MediaRequest(string ElementId, MediaTransport Transport);
 
+public static class PlayBarTargets
+{
+    public const string Prefix = "playbar:";
+
+    public static string For(string videoId) => Prefix + videoId;
+
+    public static bool TryGetVideoId(string? targetId, out string videoId)
+    {
+        if (!string.IsNullOrEmpty(targetId) &&
+            targetId.StartsWith(Prefix, StringComparison.Ordinal) &&
+            targetId.Length > Prefix.Length)
+        {
+            videoId = targetId[Prefix.Length..];
+            return true;
+        }
+
+        videoId = "";
+        return false;
+    }
+}
+
 public static class Ids
 {
     public static string New() => Guid.NewGuid().ToString("N")[..12];
