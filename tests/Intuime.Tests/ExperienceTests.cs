@@ -444,4 +444,129 @@ public class ExperienceTests
         var again = session.AddElement(ElementKind.Button, amber);
         Assert.Equal("Amber 2", again.Name);
     }
+
+    [Fact]
+    public void Tap_effect_plays_then_rests_and_round_trips()
+    {
+        var button = ElementFactory.Create(ElementKind.Button, 10, 20, 0, 1);
+        button.TapEffect = "Pop";
+        button.EffectScale = 4;
+        var clone = ProjectStore.Clone(button);
+        Assert.Equal("Pop", clone.TapEffect);
+        Assert.Equal(1, clone.EffectScale);
+        Assert.True(ElementFactory.CapturesPointer(button));
+
+        var scene = new Scene { Id = "only", Name = "Only", Elements = { button } };
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(new ExperienceDocument { StartSceneId = "only", Scenes = { scene } }, () => now);
+        engine.Start();
+        var live = engine.Current!.Elements.Single();
+        engine.PointerUp(live.Id);
+        Assert.Equal(1, live.EffectScale);
+
+        now = now.AddMilliseconds(210);
+        engine.Tick();
+        Assert.True(live.EffectScale > 1.05);
+
+        now = now.AddMilliseconds(210);
+        engine.Tick();
+        Assert.Equal(1, live.EffectScale);
+        Assert.Equal(0, live.EffectShiftX);
+        Assert.Equal(0, live.EffectRotation);
+        Assert.Null(live.EffectFill);
+    }
+
+    [Fact]
+    public void Play_effect_shakes_the_touched_element_and_ignores_unknown_names()
+    {
+        var button = ElementFactory.Create(ElementKind.Rectangle, 0, 0, 0, 1);
+        button.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.PlayEffect, Text = "Shake" } }
+        });
+        var scene = new Scene { Id = "only", Name = "Only", Elements = { button } };
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(new ExperienceDocument { StartSceneId = "only", Scenes = { scene } }, () => now);
+        engine.Start();
+        var live = engine.Current!.Elements.Single();
+        engine.PointerUp(live.Id);
+        now = now.AddMilliseconds(40);
+        engine.Tick();
+        Assert.True(Math.Abs(live.EffectShiftX) > 8);
+
+        var shift = live.EffectShiftX;
+        engine.RunExternal(new ExperienceAction { Kind = ActionKind.PlayEffect, TargetId = live.Id, Text = "Wiggle" });
+        Assert.Equal(shift, live.EffectShiftX);
+    }
+
+    [Fact]
+    public void Tap_effect_finishes_before_the_scene_changes()
+    {
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.TapEffect = "Bounce";
+        button.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "next" } }
+        });
+        var next = new Scene { Id = "next", Name = "Next" };
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(new ExperienceDocument
+        {
+            StartSceneId = "only",
+            Scenes =
+            {
+                new Scene { Id = "only", Name = "Only", Elements = { button } },
+                next
+            }
+        }, () => now);
+        engine.Start();
+        engine.PointerUp(button.Id);
+        Assert.Equal("only", engine.Current!.Id);
+        var live = engine.Current.Elements.Single();
+        now = now.AddMilliseconds(320);
+        engine.Tick();
+        Assert.Equal("only", engine.Current.Id);
+        Assert.True(live.EffectShiftY < -10);
+
+        now = now.AddMilliseconds(320);
+        engine.Tick();
+        Assert.Equal("next", engine.Current.Id);
+    }
+
+    [Fact]
+    public void Play_effect_action_waits_before_the_next_scene()
+    {
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions =
+            {
+                new ExperienceAction { Kind = ActionKind.PlayEffect, Text = "Fade" },
+                new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "next" }
+            }
+        });
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(new ExperienceDocument
+        {
+            StartSceneId = "only",
+            Scenes =
+            {
+                new Scene { Id = "only", Name = "Only", Elements = { button } },
+                new Scene { Id = "next", Name = "Next" }
+            }
+        }, () => now);
+        engine.Start();
+        engine.PointerUp(button.Id);
+        Assert.Equal("only", engine.Current!.Id);
+        now = now.AddMilliseconds(210);
+        engine.Tick();
+        Assert.Equal("only", engine.Current.Id);
+        Assert.True(engine.Current.Elements.Single().EffectOpacity < 0.5);
+        now = now.AddMilliseconds(210);
+        engine.Tick();
+        Assert.Equal("next", engine.Current.Id);
+    }
 }

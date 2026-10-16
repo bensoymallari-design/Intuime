@@ -152,6 +152,8 @@ public static class ElementFactory
             return true;
         if (!string.IsNullOrWhiteSpace(element.Url))
             return true;
+        if (TapEffects.Known(element.TapEffect))
+            return true;
         return element.Interactions.Any(i =>
             i.Trigger is TriggerKind.Tap or TriggerKind.DoubleTap or TriggerKind.Press or TriggerKind.Release);
     }
