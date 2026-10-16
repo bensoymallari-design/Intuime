@@ -34,6 +34,12 @@ public partial class ComposerWindow : Window
         InitializeComponent();
         _inspector = new InspectorPanel(BrowseAsset);
         InspectorHost.Content = _inspector;
+        _inspector.PinnedEffectChanged += () =>
+        {
+            EffectHost.Content = _inspector.PinnedEffect;
+            EffectHost.IsVisible = _inspector.PinnedEffect != null;
+        };
+        _inspector.PreviewEffect += (id, name) => _surface.PreviewTap(id, name);
         _zoomHost.LayoutTransform = _scale;
         _frame.Child = _surface;
         _zoomHost.Child = _frame;

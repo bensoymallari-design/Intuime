@@ -27,6 +27,10 @@ public sealed class SceneSurface : UserControl
     private readonly Dictionary<string, Node> _nodes = new();
     private readonly Dictionary<string, Bitmap> _bitmaps = new();
     private readonly DispatcherTimer _clocks;
+    private readonly DispatcherTimer _preview;
+    private string? _previewId;
+    private string _previewName = "";
+    private DateTime _previewStart;
     private EditorSession? _session;
     private PlaybackEngine? _engine;
     private string _assetRoot = "";
@@ -58,6 +62,66 @@ public sealed class SceneSurface : UserControl
         _clocks = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
         _clocks.Tick += (_, _) => RefreshTexts();
         _clocks.Start();
+        _preview = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
+        _preview.Tick += (_, _) => AdvancePreview();
+    }
+
+    public void PreviewTap(string elementId, string effectName)
+    {
+        StopPreview();
+        if (!_design || !TapEffects.Known(effectName) || Lookup(elementId) == null)
+            return;
+        _previewId = elementId;
+        _previewName = effectName;
+        _previewStart = DateTime.UtcNow;
+        _preview.Start();
+    }
+
+    private void AdvancePreview()
+    {
+        if (_previewId == null)
+        {
+            _preview.Stop();
+            return;
+        }
+        var element = Lookup(_previewId);
+        if (element == null)
+        {
+            StopPreview();
+            return;
+        }
+        var t = (DateTime.UtcNow - _previewStart).TotalMilliseconds / Math.Max(1, TapEffects.DurationMs(_previewName));
+        if (t >= 1)
+        {
+            TapEffects.Reset(element);
+            PaintEffect(element);
+            _previewId = null;
+            _preview.Stop();
+            return;
+        }
+        TapEffects.Apply(element, _previewName, t);
+        PaintEffect(element);
+    }
+
+    private void StopPreview()
+    {
+        _preview.Stop();
+        if (_previewId == null)
+            return;
+        var element = Lookup(_previewId);
+        _previewId = null;
+        if (element == null)
+            return;
+        TapEffects.Reset(element);
+        PaintEffect(element);
+    }
+
+    private void PaintEffect(SceneElement element)
+    {
+        if (!_nodes.TryGetValue(element.Id, out var node))
+            return;
+        ApplyGeometry(node, element);
+        ApplyChrome(node, element);
     }
 
     public bool IsGesturing => _gesture != null;
@@ -603,6 +667,21 @@ public sealed class SceneSurface : UserControl
         }
 
         _marquee.IsVisible = false;
+        if (gesture.Kind == GestureKind.Move)
+        {
+            var end = e.GetPosition(_canvas);
+            var moved = Math.Abs(end.X - gesture.Start.X) + Math.Abs(end.Y - gesture.Start.Y);
+            if (moved < 6 && gesture.Origins.Count == 1)
+            {
+                var tapped = Lookup(gesture.Origins.Keys.First());
+                if (tapped != null && TapEffects.Known(tapped.TapEffect))
+                {
+                    _session?.Commit();
+                    PreviewTap(tapped.Id, tapped.TapEffect);
+                    return;
+                }
+            }
+        }
         if (gesture.Kind == GestureKind.Marquee && _session != null)
         {
             var rect = RectOf(gesture.Start, e.GetPosition(_canvas));
@@ -705,9 +784,16 @@ public sealed class SceneSurface : UserControl
         Canvas.SetTop(node.Root, element.Y - _originY);
         node.Root.Width = Math.Max(8, element.Width);
         node.Root.Height = Math.Max(8, element.Height);
-        node.Root.RenderTransform = new RotateTransform(element.Rotation, element.Width / 2, element.Height / 2);
+        var scale = Math.Max(0.01, element.EffectScale);
+        var motion = new TransformGroup();
+        motion.Children.Add(new ScaleTransform(scale, scale));
+        motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
+        motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
+        node.Root.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+        node.Root.RenderTransform = motion;
         var hidden = !element.IsVisible;
-        node.Root.Opacity = hidden ? (_design ? Math.Min(element.Opacity, 0.35) : 0) : element.Opacity;
+        var opacity = Math.Clamp(element.Opacity * element.EffectOpacity, 0, 1);
+        node.Root.Opacity = hidden ? (_design ? Math.Min(element.Opacity, 0.35) : 0) : opacity;
         node.Root.IsHitTestVisible = _design || (element.IsVisible && ElementFactory.CapturesPointer(element));
         if (!_design && element.IsVisible && ElementFactory.CapturesPointer(element))
             node.Root.Cursor = new Cursor(StandardCursorType.Hand);
@@ -722,7 +808,7 @@ public sealed class SceneSurface : UserControl
         }
         if (node.Chrome == null)
             return;
-        var fill = element.Fill;
+        var fill = element.EffectFill ?? element.Fill;
         if (_design && element.Kind == ElementKind.Hotspot)
             fill = "#33E7A23A";
         node.Chrome.Background = Painting.Brush(fill, "#00000000");
@@ -745,7 +831,7 @@ public sealed class SceneSurface : UserControl
 
     private static void ApplyShape(Ellipse shape, SceneElement element)
     {
-        shape.Fill = Painting.Brush(element.Fill, "#E7A23A");
+        shape.Fill = Painting.Brush(element.EffectFill ?? element.Fill, "#E7A23A");
         shape.Stroke = Painting.Brush(element.Stroke, "#00000000");
         shape.StrokeThickness = element.StrokeThickness;
         shape.Opacity = 1;

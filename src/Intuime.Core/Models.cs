@@ -53,7 +53,8 @@ public enum ActionKind
     SetVariable,
     Wait,
     RestartExperience,
-    ExitPlayer
+    ExitPlayer,
+    PlayEffect
 }
 
 public enum MediaTransport
@@ -129,10 +130,29 @@ public sealed class SceneElement
     public bool Loop { get; set; }
     public bool ShowControls { get; set; } = true;
     public bool HasShadow { get; set; }
+    public string TapEffect { get; set; } = "";
     public List<Interaction> Interactions { get; set; } = new();
 
     [JsonIgnore]
     public bool IsPlaying { get; set; }
+
+    [JsonIgnore]
+    public double EffectScale { get; set; } = 1;
+
+    [JsonIgnore]
+    public double EffectOpacity { get; set; } = 1;
+
+    [JsonIgnore]
+    public double EffectRotation { get; set; }
+
+    [JsonIgnore]
+    public double EffectShiftX { get; set; }
+
+    [JsonIgnore]
+    public double EffectShiftY { get; set; }
+
+    [JsonIgnore]
+    public string? EffectFill { get; set; }
 }
 
 public sealed class Interaction
@@ -230,6 +250,7 @@ public static class Labels
         ActionKind.Wait => "Wait",
         ActionKind.RestartExperience => "Restart experience",
         ActionKind.ExitPlayer => "Exit player",
+        ActionKind.PlayEffect => "Play effect",
         _ => kind.ToString()
     };
 

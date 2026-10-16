@@ -23,6 +23,10 @@ public sealed class InspectorPanel : StackPanel
         Spacing = 10;
     }
 
+    public Control? PinnedEffect { get; private set; }
+    public event Action? PinnedEffectChanged;
+    public event Action<string, string>? PreviewEffect;
+
     public void Show(EditorSession session, string tab)
     {
         _session = session;
@@ -36,12 +40,14 @@ public sealed class InspectorPanel : StackPanel
             return;
         _building = true;
         Children.Clear();
+        PinnedEffect = null;
         if (_tab == "variables")
             BuildVariables();
         else if (_tab == "interactions")
             BuildInteractions();
         else
             BuildProperties();
+        PinnedEffectChanged?.Invoke();
         Dispatcher.UIThread.Post(() => _building = false, DispatcherPriority.Background);
     }
 
@@ -102,6 +108,7 @@ public sealed class InspectorPanel : StackPanel
 
         Heading(element.Name);
         Note(Labels.Element(element.Kind));
+        PinnedEffect = TapEffectPin(element);
         Text("Name", element.Name, value => element.Name = string.IsNullOrWhiteSpace(value) ? element.Name : value.Trim(), structure: true);
         Number("X", element.X, value => element.X = value);
         Number("Y", element.Y, value => element.Y = value);
@@ -166,6 +173,29 @@ public sealed class InspectorPanel : StackPanel
             Number("Max", element.Max, value => element.Max = value);
         }
         Check("Shadow", element.HasShadow, value => element.HasShadow = value);
+    }
+
+    private Control TapEffectPin(SceneElement element)
+    {
+        var effectNames = new[] { "None" }.Concat(TapEffects.All).ToArray();
+        var currentEffect = TapEffects.All.FirstOrDefault(name =>
+            string.Equals(name, element.TapEffect, StringComparison.OrdinalIgnoreCase)) ?? "None";
+        var panel = new StackPanel { Spacing = 4, Margin = new Avalonia.Thickness(12, 0, 12, 8) };
+        panel.Children.Add(ChoiceControl("When tapped", effectNames, currentEffect, value => value, value =>
+        {
+            element.TapEffect = value == "None" ? "" : value;
+            _session?.Commit();
+            if (TapEffects.Known(element.TapEffect))
+                PreviewEffect?.Invoke(element.Id, element.TapEffect);
+        }));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Pick Pop, Bounce, Shake, or another motion. The button plays it here, and again when someone taps it in Play.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Painting.Brush(Painting.Muted),
+            FontSize = 12
+        });
+        return panel;
     }
 
     private void BuildInteractions()
@@ -265,6 +295,8 @@ public sealed class InspectorPanel : StackPanel
         panel.Children.Add(ChoiceControl("Do", Enum.GetValues<ActionKind>(), action.Kind, Labels.Action, value =>
         {
             action.Kind = value;
+            if (value == ActionKind.PlayEffect && !TapEffects.Known(action.Text))
+                action.Text = "Pop";
             CommitAndRefresh();
         }));
         switch (action.Kind)
@@ -286,6 +318,23 @@ public sealed class InspectorPanel : StackPanel
             case ActionKind.PauseMedia:
             case ActionKind.StopMedia:
                 panel.Children.Add(ElementChoice(action, context));
+                break;
+            case ActionKind.PlayEffect:
+                panel.Children.Add(ElementChoice(action, context));
+                var effect = TapEffects.All.FirstOrDefault(name =>
+                    string.Equals(name, action.Text, StringComparison.OrdinalIgnoreCase)) ?? "Pop";
+                panel.Children.Add(ChoiceControl("Effect", TapEffects.All, effect, value => value, value =>
+                {
+                    action.Text = value;
+                    _session?.TouchLive();
+                }));
+                panel.Children.Add(new TextBlock
+                {
+                    Text = "Leave the element on “the element that was touched” to use the one they tapped. If Go to scene is the next action, that scene waits until the effect finishes.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Painting.Brush(Painting.Muted),
+                    FontSize = 12
+                });
                 break;
         }
         if (action.Kind is ActionKind.SetText or ActionKind.OpenUrl or ActionKind.SetBackground or ActionKind.SetFill)
