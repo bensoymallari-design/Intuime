@@ -1,0 +1,188 @@
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Threading;
+using Intuime.Core;
+
+namespace Intuime.Views;
+
+public static class InsertDesigns
+{
+    public static MenuItem KindMenu(ElementKind kind, string label, Action<ElementPreset> insert)
+    {
+        var parent = new MenuItem { Header = label };
+        foreach (var preset in ElementPresets.For(kind))
+        {
+            var captured = preset;
+            var child = new MenuItem
+            {
+                Header = Row(kind, preset),
+                Padding = new Thickness(6, 3)
+            };
+            child.Click += (_, _) => insert(captured);
+            parent.Items.Add(child);
+        }
+        parent.PointerEntered += (_, _) =>
+        {
+            if (!parent.IsSubMenuOpen)
+                parent.Open();
+        };
+        return parent;
+    }
+
+    public static Control Row(ElementKind kind, ElementPreset preset)
+    {
+        var element = ElementFactory.Create(kind, 0, 0, 0, 1);
+        preset.Apply(element);
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 10,
+            Children = { Swatch(kind, element, preset.Sample), new TextBlock
+            {
+                Text = preset.Name,
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = Painting.Brush(Painting.Text),
+                FontSize = 13
+            } }
+        };
+        return row;
+    }
+
+    public static void ShowOnHover(Control anchor, ElementKind kind, Action<ElementPreset> insert)
+    {
+        var hover = new Hover(kind, insert);
+        anchor.PointerEntered += (_, _) => hover.Show(anchor);
+        anchor.PointerExited += (_, _) => hover.ScheduleClose();
+    }
+
+    private static Control Swatch(ElementKind kind, SceneElement element, string sample)
+    {
+        var clearFill = string.IsNullOrWhiteSpace(element.Fill) || element.Fill == "#00000000";
+        var clearStroke = element.StrokeThickness <= 0 || element.Stroke == "#00000000";
+        var circle = kind == ElementKind.Ellipse || (kind == ElementKind.Image && Math.Abs(element.Width - element.Height) < 2 && element.CornerRadius >= element.Width / 2);
+        var outline = !clearStroke || kind == ElementKind.Hotspot;
+        var plate = new Border
+        {
+            Width = circle ? 46 : 108,
+            Height = 36,
+            CornerRadius = new CornerRadius(8),
+            Background = Painting.Brush("#0E1822"),
+            Child = new Border
+            {
+                Width = circle ? 28 : 96,
+                Height = 28,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                CornerRadius = new CornerRadius(circle ? 14 : Math.Clamp(element.CornerRadius, 0, 14)),
+                Background = Painting.Brush(clearFill ? "#00000000" : element.Fill),
+                BorderBrush = Painting.Brush(outline ? (clearStroke ? "#E7A23A" : element.Stroke) : "#00000000"),
+                BorderThickness = new Thickness(outline ? 1.5 : 0),
+                BoxShadow = element.HasShadow ? BoxShadows.Parse("0 4 10 0 #55000000") : default,
+                Child = ShowsWords(kind) ? new TextBlock
+                {
+                    Text = Short(sample),
+                    FontSize = kind == ElementKind.Text ? 12 : 11,
+                    FontWeight = element.FontWeight == "Bold" ? FontWeight.Bold : FontWeight.Normal,
+                    FontStyle = element.Italic ? FontStyle.Italic : FontStyle.Normal,
+                    Foreground = Painting.Brush(element.Foreground),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Margin = new Thickness(6, 0)
+                } : null
+            }
+        };
+        return plate;
+    }
+
+    private static bool ShowsWords(ElementKind kind) => kind is
+        ElementKind.Text or ElementKind.Button or ElementKind.WebLink or ElementKind.Audio
+        or ElementKind.Clock or ElementKind.DataList or ElementKind.Counter;
+
+    private static string Short(string sample)
+    {
+        var line = sample.Split('\n')[0];
+        return line.Length <= 14 ? line : line[..13] + "…";
+    }
+
+    private sealed class Hover
+    {
+        private static Hover? _open;
+        private readonly Flyout _flyout;
+        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(260) };
+
+        public Hover(ElementKind kind, Action<ElementPreset> insert)
+        {
+            var flyout = new Flyout();
+            _flyout = flyout;
+            var list = new StackPanel { Spacing = 2 };
+            foreach (var preset in ElementPresets.For(kind))
+            {
+                var captured = preset;
+                var button = new Button
+                {
+                    Content = Row(kind, preset),
+                    Background = Brushes.Transparent,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    HorizontalContentAlignment = HorizontalAlignment.Left,
+                    Padding = new Thickness(6, 4),
+                    BorderThickness = new Thickness(0)
+                };
+                button.PointerEntered += (_, _) => button.Background = Painting.Brush("#1B2330");
+                button.PointerExited += (_, _) => button.Background = Brushes.Transparent;
+                button.Click += (_, _) =>
+                {
+                    _timer.Stop();
+                    flyout.Hide();
+                    if (_open == this)
+                        _open = null;
+                    insert(captured);
+                };
+                list.Children.Add(button);
+            }
+            var host = new Border
+            {
+                Background = Painting.Brush("#121820"),
+                BorderBrush = Painting.Brush("#2A3544"),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(6),
+                MinWidth = 220,
+                Child = list
+            };
+            host.PointerEntered += (_, _) => _timer.Stop();
+            host.PointerExited += (_, _) => _timer.Start();
+            flyout.Content = host;
+            flyout.Placement = PlacementMode.RightEdgeAlignedTop;
+            flyout.ShowMode = FlyoutShowMode.Standard;
+            _timer.Tick += (_, _) =>
+            {
+                _timer.Stop();
+                _flyout.Hide();
+                if (_open == this)
+                    _open = null;
+            };
+        }
+
+        public void Show(Control anchor)
+        {
+            if (_open != null && _open != this)
+                _open.Hide();
+            _open = this;
+            _timer.Stop();
+            if (!_flyout.IsOpen)
+                _flyout.ShowAt(anchor);
+        }
+
+        public void ScheduleClose() => _timer.Start();
+
+        private void Hide()
+        {
+            _timer.Stop();
+            _flyout.Hide();
+        }
+    }
+}
