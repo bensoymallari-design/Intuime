@@ -66,7 +66,11 @@ public partial class ComposerWindow : Window
         Viewport.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
         DragDrop.SetAllowDrop(Viewport, true);
         Viewport.AddHandler(DragDrop.DropEvent, OnDrop);
-        Viewport.SizeChanged += (_, _) => RefitIfAutomatic();
+        Viewport.SizeChanged += (_, _) =>
+        {
+            RefitIfAutomatic();
+            CenterStage();
+        };
 
         var root = AssetFiles.PrepareSampleRoot();
         _session.Load(SampleExperiences.CreateLumenGallery(), null, root, markClean: true);
@@ -395,6 +399,20 @@ public partial class ComposerWindow : Window
         _scale.ScaleX = _session.Zoom;
         _scale.ScaleY = _session.Zoom;
         SetStatus();
+        CenterStage();
+    }
+
+    private void CenterStage()
+    {
+        var scaledWidth = _session.Document.Width * _scale.ScaleX;
+        var scaledHeight = _session.Document.Height * _scale.ScaleY;
+        var viewWidth = Viewport.Bounds.Width;
+        var viewHeight = Viewport.Bounds.Height;
+        if (viewWidth < 40 || viewHeight < 40 || scaledWidth < 1 || scaledHeight < 1)
+            return;
+        var padX = Math.Max(24, (viewWidth - scaledWidth) / 2);
+        var padY = Math.Max(24, (viewHeight - scaledHeight) / 2);
+        StageHost.Margin = new Thickness(padX, padY);
     }
 
     private void RefitIfAutomatic()
@@ -408,8 +426,8 @@ public partial class ComposerWindow : Window
             return;
         _fitSize = size;
         var scale = Math.Min(
-            (size.Width - 72) / _session.Document.Width,
-            (size.Height - 72) / _session.Document.Height);
+            (size.Width - 48) / _session.Document.Width,
+            (size.Height - 48) / _session.Document.Height);
         SetZoom(scale, fromUser: false);
     }
 
