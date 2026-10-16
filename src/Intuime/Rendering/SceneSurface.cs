@@ -272,6 +272,8 @@ public sealed class SceneSurface : UserControl
                     var live = Lookup(element.Id) ?? element;
                     primary.Text = live.Kind == ElementKind.Video ? "Video" : (string.IsNullOrWhiteSpace(live.Text) ? "Audio" : live.Text);
                     var file = string.IsNullOrWhiteSpace(live.Source) ? "No file yet" : System.IO.Path.GetFileName(live.Source);
+                    if (live.Loop)
+                        file += "  ·  loops";
                     secondary.Text = live.IsPlaying ? file + "  ·  playing" : file;
                     StyleText(primary, live);
                     secondary.Foreground = Painting.Brush(live.Foreground);

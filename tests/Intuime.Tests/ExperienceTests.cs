@@ -352,4 +352,16 @@ public class ExperienceTests
         Assert.Null(LayoutMath.VideoOverlayOwner(elements, outside));
         Assert.Null(LayoutMath.VideoOverlayOwner(elements, video));
     }
+
+    [Fact]
+    public void Video_loop_and_play_bar_round_trip()
+    {
+        var video = ElementFactory.Create(ElementKind.Video, 0, 0, 0, 1);
+        Assert.True(video.ShowControls);
+        video.Loop = true;
+        video.ShowControls = false;
+        var clone = ProjectStore.Clone(video);
+        Assert.True(clone.Loop);
+        Assert.False(clone.ShowControls);
+    }
 }

@@ -112,6 +112,7 @@ public sealed class PlayerWindow : Window
             if (_hintAge > 2.4)
                 _hint.Opacity = Math.Max(0, _hint.Opacity - 0.04);
             LayoutVideos();
+            UpdateTransports();
         };
         _timer.Start();
         Opened += (_, _) => Focus();
@@ -169,32 +170,39 @@ public sealed class PlayerWindow : Window
                     EnableMouseInput = false,
                     Volume = 80
                 };
+                var host = new Host(player, element.Loop, element.Kind == ElementKind.Video && element.ShowControls);
+                player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
+                player.Playing += (_, _) => Dispatcher.UIThread.Post(() => OnPlaying(host));
                 VideoView? view = null;
-                SceneSurface? foreground = null;
-                ScaleTransform? foregroundScale = null;
                 if (element.Kind == ElementKind.Video)
                 {
                     var videoId = element.Id;
-                    foreground = new SceneSurface();
-                    foreground.UsePlayback(_engine, _assetRoot);
-                    foreground.UseOverlay(element.X, element.Y, element.Width, element.Height,
+                    host.Foreground = new SceneSurface();
+                    host.Foreground.UsePlayback(_engine, _assetRoot);
+                    host.Foreground.UseOverlay(element.X, element.Y, element.Width, element.Height,
                         candidate => OverlayOwner(candidate) == videoId);
-                    foreground.Rebuild();
-                    foregroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
-                    view = new VideoView
+                    host.Foreground.Rebuild();
+                    host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
+                    var layer = new Grid
                     {
-                        MediaPlayer = player,
-                        Content = new LayoutTransformControl
+                        Children =
                         {
-                            LayoutTransform = foregroundScale,
-                            HorizontalAlignment = HorizontalAlignment.Left,
-                            VerticalAlignment = VerticalAlignment.Top,
-                            Child = foreground
+                            new LayoutTransformControl
+                            {
+                                LayoutTransform = host.ForegroundScale,
+                                HorizontalAlignment = HorizontalAlignment.Left,
+                                VerticalAlignment = VerticalAlignment.Top,
+                                Child = host.Foreground
+                            }
                         }
                     };
+                    if (host.ShowControls)
+                        layer.Children.Add(BuildPlayBar(host));
+                    view = new VideoView { MediaPlayer = player, Content = layer };
+                    host.View = view;
                     _overlay.Children.Add(view);
                 }
-                _hosts[element.Id] = new Host(player, view, foreground, foregroundScale);
+                _hosts[element.Id] = host;
             }
             catch (Exception ex)
             {
@@ -221,15 +229,17 @@ public sealed class PlayerWindow : Window
                         ShowStatus("Missing media file: " + element.Source);
                         return;
                     }
-                    var vlc = MediaRuntime.Shared;
-                    if (vlc == null)
-                        return;
-                    host.Player.Play(new LibVLCSharp.Shared.Media(vlc, path, FromType.FromPath));
+                    host.Path = path;
+                    host.Loop = element.Loop;
+                    StartMedia(host);
                     break;
                 case MediaTransport.Pause:
-                    host.Player.Pause();
+                    host.Ended = false;
+                    host.Player.SetPause(true);
                     break;
                 case MediaTransport.Stop:
+                    host.Ended = false;
+                    host.PendingSeekMs = null;
                     host.Player.Stop();
                     break;
             }
@@ -265,6 +275,230 @@ public sealed class PlayerWindow : Window
             host.Foreground?.MoveOverlay(element.X, element.Y, element.Width, element.Height);
             host.Foreground?.Sync();
         }
+    }
+
+    private Control BuildPlayBar(Host host)
+    {
+        var toggle = new Button
+        {
+            Content = "Play",
+            MinWidth = 96,
+            Padding = new Thickness(12, 6),
+            Background = Painting.Brush("#E7A23A"),
+            Foreground = Painting.Brush("#1A1204"),
+            CornerRadius = new CornerRadius(8)
+        };
+        toggle.Click += (_, _) => TogglePlayback(host);
+        var readout = new TextBlock
+        {
+            Text = "Ready",
+            Foreground = Brushes.White,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 13
+        };
+        var slider = new Slider { Minimum = 0, Maximum = 1000, VerticalAlignment = VerticalAlignment.Center };
+        slider.AddHandler(PointerPressedEvent, (_, _) => host.Scrubbing = true, RoutingStrategies.Tunnel);
+        slider.AddHandler(PointerReleasedEvent, (_, _) =>
+        {
+            host.Scrubbing = false;
+            SeekFromSlider(host);
+        }, RoutingStrategies.Tunnel);
+        slider.ValueChanged += (_, _) =>
+        {
+            if (host.Scrubbing)
+                SeekFromSlider(host);
+        };
+        var frame = new TextBox
+        {
+            Width = 72,
+            Watermark = "Frame",
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        frame.GotFocus += (_, _) => host.FrameEditing = true;
+        frame.LostFocus += (_, _) =>
+        {
+            host.FrameEditing = false;
+            SeekFrame(host);
+        };
+        frame.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter)
+                return;
+            SeekFrame(host);
+            e.Handled = true;
+        };
+        host.Toggle = toggle;
+        host.Readout = readout;
+        host.Slider = slider;
+        host.FrameBox = frame;
+        return new Border
+        {
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(12, 0, 12, 12),
+            Padding = new Thickness(10, 8),
+            CornerRadius = new CornerRadius(10),
+            Background = Painting.Brush("#CC101820"),
+            Child = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto,72"),
+                ColumnSpacing = 10,
+                Children =
+                {
+                    toggle,
+                    readout,
+                    At(slider, 2),
+                    At(new TextBlock
+                    {
+                        Text = "Frame",
+                        Foreground = Brushes.White,
+                        VerticalAlignment = VerticalAlignment.Center,
+                        FontSize = 13
+                    }, 3),
+                    At(frame, 4)
+                }
+            }
+        };
+    }
+
+    private static Control At(Control control, int column)
+    {
+        Grid.SetColumn(control, column);
+        return control;
+    }
+
+    private void OnEnded(Host host)
+    {
+        if (host.Loop && !string.IsNullOrEmpty(host.Path))
+        {
+            StartMedia(host);
+            return;
+        }
+        host.Ended = true;
+        host.PendingSeekMs = null;
+        UpdateTransport(host);
+    }
+
+    private void OnPlaying(Host host)
+    {
+        RememberFps(host);
+        if (host.PendingSeekMs is not long ms)
+            return;
+        host.PendingSeekMs = null;
+        host.Player.Time = ms;
+        host.Player.SetPause(true);
+        host.Ended = false;
+        UpdateTransport(host);
+    }
+
+    private void TogglePlayback(Host host)
+    {
+        if (string.IsNullOrEmpty(host.Path))
+        {
+            ShowStatus("Choose a video file first.");
+            return;
+        }
+        if (host.Ended || host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error)
+        {
+            StartMedia(host);
+            return;
+        }
+        host.Player.SetPause(host.Player.State != VLCState.Paused);
+        host.Ended = false;
+        UpdateTransport(host);
+    }
+
+    private void StartMedia(Host host)
+    {
+        var vlc = MediaRuntime.Shared;
+        if (vlc == null || string.IsNullOrEmpty(host.Path))
+            return;
+        host.Ended = false;
+        host.Player.Play(new LibVLCSharp.Shared.Media(vlc, host.Path, FromType.FromPath));
+    }
+
+    private void SeekFromSlider(Host host)
+    {
+        if (host.Slider == null)
+            return;
+        var length = host.Player.Length;
+        if (length <= 0)
+            return;
+        SeekAndPause(host, (long)(host.Slider.Value / host.Slider.Maximum * length));
+    }
+
+    private void SeekFrame(Host host)
+    {
+        if (host.FrameBox == null || !int.TryParse(host.FrameBox.Text, out var frame))
+            return;
+        var fps = host.Fps > 1 ? host.Fps : 24;
+        SeekAndPause(host, (long)(Math.Max(0, frame) / fps * 1000.0));
+    }
+
+    private void SeekAndPause(Host host, long milliseconds)
+    {
+        milliseconds = Math.Max(0, milliseconds);
+        host.Ended = false;
+        if (host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error || host.Player.Media == null)
+        {
+            host.PendingSeekMs = milliseconds;
+            StartMedia(host);
+            return;
+        }
+        host.Player.Time = milliseconds;
+        host.Player.SetPause(true);
+        UpdateTransport(host);
+    }
+
+    private static void RememberFps(Host host)
+    {
+        var media = host.Player.Media;
+        if (media == null)
+            return;
+        foreach (var track in media.Tracks)
+        {
+            if (track.TrackType != TrackType.Video)
+                continue;
+            var video = track.Data.Video;
+            if (video.FrameRateDen > 0 && video.FrameRateNum > 0)
+                host.Fps = video.FrameRateNum / (double)video.FrameRateDen;
+        }
+    }
+
+    private void UpdateTransports()
+    {
+        foreach (var host in _hosts.Values)
+            UpdateTransport(host);
+    }
+
+    private static void UpdateTransport(Host host)
+    {
+        if (host.Toggle == null || host.Readout == null || host.Slider == null)
+            return;
+        var state = host.Player.State;
+        var ended = host.Ended || state == VLCState.Ended;
+        host.Toggle.Content = ended ? "Play again" : state == VLCState.Playing ? "Pause" : "Play";
+        var time = host.Player.Time;
+        var length = host.Player.Length;
+        var label = ended ? "Ended" : state == VLCState.Playing ? "Playing" : state == VLCState.Paused ? "Paused" : "Ready";
+        var fps = host.Fps > 1 ? host.Fps : 0;
+        var frame = fps > 1 && time >= 0 ? (int)Math.Round(time / 1000.0 * fps) : 0;
+        host.Readout.Text = length > 0
+            ? $"{label}   {Clock(time)} / {Clock(length)}" + (fps > 1 ? $"   frame {frame}" : "")
+            : label;
+        if (!host.Scrubbing && length > 0)
+            host.Slider.Value = Math.Clamp(time / (double)length * host.Slider.Maximum, 0, host.Slider.Maximum);
+        if (!host.FrameEditing && fps > 1 && host.FrameBox != null)
+            host.FrameBox.Text = frame.ToString();
+    }
+
+    private static string Clock(long milliseconds)
+    {
+        if (milliseconds < 0)
+            milliseconds = 0;
+        var time = TimeSpan.FromMilliseconds(milliseconds);
+        return time.TotalHours >= 1
+            ? $"{(int)time.TotalHours}:{time.Minutes:00}:{time.Seconds:00}"
+            : $"{time.Minutes}:{time.Seconds:00}";
     }
 
     private string? OverlayOwner(SceneElement candidate)
@@ -331,5 +565,30 @@ public sealed class PlayerWindow : Window
         _overlay.Children.Clear();
     }
 
-    private sealed record Host(MediaPlayer Player, VideoView? View, SceneSurface? Foreground, ScaleTransform? ForegroundScale);
+    private sealed class Host
+    {
+        public Host(MediaPlayer player, bool loop, bool showControls)
+        {
+            Player = player;
+            Loop = loop;
+            ShowControls = showControls;
+        }
+
+        public MediaPlayer Player { get; }
+        public VideoView? View { get; set; }
+        public SceneSurface? Foreground { get; set; }
+        public ScaleTransform? ForegroundScale { get; set; }
+        public string Path { get; set; } = "";
+        public bool Loop { get; set; }
+        public bool ShowControls { get; }
+        public bool Scrubbing { get; set; }
+        public bool FrameEditing { get; set; }
+        public bool Ended { get; set; }
+        public long? PendingSeekMs { get; set; }
+        public double Fps { get; set; }
+        public Button? Toggle { get; set; }
+        public TextBlock? Readout { get; set; }
+        public Slider? Slider { get; set; }
+        public TextBox? FrameBox { get; set; }
+    }
 }

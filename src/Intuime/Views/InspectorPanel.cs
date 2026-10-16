@@ -143,7 +143,12 @@ public sealed class InspectorPanel : StackPanel
             });
         }
         if (element.Kind is ElementKind.Video or ElementKind.Audio)
+        {
             Check("Autoplay", element.Autoplay, value => element.Autoplay = value);
+            Check("Loop", element.Loop, value => element.Loop = value);
+        }
+        if (element.Kind == ElementKind.Video)
+            Check("Play bar", element.ShowControls, value => element.ShowControls = value);
         if (element.Kind == ElementKind.WebLink)
             Text("URL", element.Url, value => element.Url = value);
         if (element.Kind == ElementKind.Clock)
