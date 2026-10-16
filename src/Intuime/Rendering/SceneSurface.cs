@@ -33,6 +33,12 @@ public sealed class SceneSurface : UserControl
     private bool _design = true;
     private Gesture? _gesture;
     private bool _inline;
+    private bool _clearPage;
+    private double _originX;
+    private double _originY;
+    private double? _clipWidth;
+    private double? _clipHeight;
+    private Func<SceneElement, bool>? _include;
 
     public SceneSurface()
     {
@@ -74,6 +80,29 @@ public sealed class SceneSurface : UserControl
         _assetRoot = assetRoot;
     }
 
+    public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include)
+    {
+        _originX = originX;
+        _originY = originY;
+        _clipWidth = Math.Max(1, width);
+        _clipHeight = Math.Max(1, height);
+        _include = include;
+        _clearPage = true;
+        Background = Brushes.Transparent;
+    }
+
+    public void MoveOverlay(double originX, double originY, double width, double height)
+    {
+        _originX = originX;
+        _originY = originY;
+        _clipWidth = Math.Max(1, width);
+        _clipHeight = Math.Max(1, height);
+        Width = _clipWidth.Value;
+        Height = _clipHeight.Value;
+        _canvas.Width = Width;
+        _canvas.Height = Height;
+    }
+
     public void SetAssetRoot(string assetRoot) => _assetRoot = assetRoot;
 
     public void SetGridVisible(bool visible) => _grid.IsVisible = visible && _design;
@@ -93,17 +122,31 @@ public sealed class SceneSurface : UserControl
             return;
         }
 
-        Width = DocumentSize().Width;
-        Height = DocumentSize().Height;
+        var size = ClipSize();
+        Width = size.Width;
+        Height = size.Height;
         _canvas.Width = Width;
         _canvas.Height = Height;
-        _page.Background = Painting.Brush(scene.Background, "#101820");
-        var background = LoadBitmap(scene.BackgroundImage);
-        _pageImage.Source = background;
-        _pageImage.IsVisible = background != null;
+        if (_clearPage)
+        {
+            _page.Background = Brushes.Transparent;
+            _pageImage.Source = null;
+            _pageImage.IsVisible = false;
+        }
+        else
+        {
+            _page.Background = Painting.Brush(scene.Background, "#101820");
+            var background = LoadBitmap(scene.BackgroundImage);
+            _pageImage.Source = background;
+            _pageImage.IsVisible = background != null;
+        }
 
         foreach (var element in scene.Elements.Select((value, index) => (value, index)).OrderBy(item => item.value.Z).ThenBy(item => item.index))
+        {
+            if (_include != null && !_include(element.value))
+                continue;
             _canvas.Children.Add(CreateNode(element.value).Root);
+        }
     }
 
     public void Sync()
@@ -113,13 +156,15 @@ public sealed class SceneSurface : UserControl
         var scene = Scene();
         if (scene == null)
             return;
-        if (_nodes.Count != scene.Elements.Count || scene.Elements.Any(element => !_nodes.ContainsKey(element.Id)))
+        var shown = scene.Elements.Where(element => _include == null || _include(element)).ToList();
+        if (_nodes.Count != shown.Count || shown.Any(element => !_nodes.ContainsKey(element.Id)))
         {
             Rebuild();
             return;
         }
 
-        _page.Background = Painting.Brush(scene.Background, "#101820");
+        if (!_clearPage)
+            _page.Background = Painting.Brush(scene.Background, "#101820");
         foreach (var element in scene.Elements)
         {
             if (!_nodes.TryGetValue(element.Id, out var node))
@@ -227,6 +272,8 @@ public sealed class SceneSurface : UserControl
                     var live = Lookup(element.Id) ?? element;
                     primary.Text = live.Kind == ElementKind.Video ? "Video" : (string.IsNullOrWhiteSpace(live.Text) ? "Audio" : live.Text);
                     var file = string.IsNullOrWhiteSpace(live.Source) ? "No file yet" : System.IO.Path.GetFileName(live.Source);
+                    if (live.Loop)
+                        file += "  ·  loops";
                     secondary.Text = live.IsPlaying ? file + "  ·  playing" : file;
                     StyleText(primary, live);
                     secondary.Foreground = Painting.Brush(live.Foreground);
@@ -645,8 +692,8 @@ public sealed class SceneSurface : UserControl
 
     private void ApplyGeometry(Node node, SceneElement element)
     {
-        Canvas.SetLeft(node.Root, element.X);
-        Canvas.SetTop(node.Root, element.Y);
+        Canvas.SetLeft(node.Root, element.X - _originX);
+        Canvas.SetTop(node.Root, element.Y - _originY);
         node.Root.Width = Math.Max(8, element.Width);
         node.Root.Height = Math.Max(8, element.Height);
         node.Root.RenderTransform = new RotateTransform(element.Rotation, element.Width / 2, element.Height / 2);
@@ -737,6 +784,13 @@ public sealed class SceneSurface : UserControl
 
     private Scene? Scene() => _design ? _session?.ActiveScene : _engine?.Current;
     private ExperienceDocument? Document() => _design ? _session?.Document : _engine?.Live;
+
+    private (double Width, double Height) ClipSize()
+    {
+        if (_clipWidth is double width && _clipHeight is double height)
+            return (width, height);
+        return DocumentSize();
+    }
 
     private (double Width, double Height) DocumentSize()
     {

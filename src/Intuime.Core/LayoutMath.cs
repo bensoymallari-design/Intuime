@@ -49,6 +49,29 @@ public static class LayoutMath
         return bounds.Right >= left && bounds.Left <= right && bounds.Bottom >= top && bounds.Top <= bottom;
     }
 
+    public static bool Overlaps(SceneElement a, SceneElement b)
+    {
+        var bounds = AxisBounds(a);
+        return Intersects(b, bounds.Left, bounds.Top, bounds.Right, bounds.Bottom);
+    }
+
+    public static string? VideoOverlayOwner(IReadOnlyList<SceneElement> elements, SceneElement item)
+    {
+        if (item.Kind == ElementKind.Video || !item.IsVisible)
+            return null;
+        SceneElement? owner = null;
+        foreach (var video in elements)
+        {
+            if (video.Kind != ElementKind.Video || !video.IsVisible || video.Z >= item.Z)
+                continue;
+            if (!Overlaps(video, item))
+                continue;
+            if (owner == null || video.Z > owner.Z)
+                owner = video;
+        }
+        return owner?.Id;
+    }
+
     public static void Align(IReadOnlyList<SceneElement> items, string edge)
     {
         if (items.Count < 2)

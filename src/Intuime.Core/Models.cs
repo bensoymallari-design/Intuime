@@ -126,6 +126,8 @@ public sealed class SceneElement
     public double Max { get; set; } = 10;
     public bool HasRange { get; set; }
     public bool Autoplay { get; set; }
+    public bool Loop { get; set; }
+    public bool ShowControls { get; set; } = true;
     public bool HasShadow { get; set; }
     public List<Interaction> Interactions { get; set; } = new();
 
