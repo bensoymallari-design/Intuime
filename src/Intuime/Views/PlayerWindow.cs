@@ -170,7 +170,7 @@ public sealed class PlayerWindow : Window
                     EnableMouseInput = false,
                     Volume = 80
                 };
-                var host = new Host(player, element.Loop);
+                var host = new Host(player, element.Loop) { ElementId = element.Id };
                 player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
                 player.Playing += (_, _) => Dispatcher.UIThread.Post(() => OnPlaying(host));
                 VideoView? view = null;
@@ -393,11 +393,8 @@ public sealed class PlayerWindow : Window
 
     private void TogglePlayback(Host host)
     {
-        if (string.IsNullOrEmpty(host.Path))
-        {
-            ShowStatus("Choose a video file first.");
+        if (!EnsureSource(host))
             return;
-        }
         if (host.Ended || host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error)
         {
             StartMedia(host);
@@ -435,8 +432,33 @@ public sealed class PlayerWindow : Window
         SeekAndPause(host, (long)(Math.Max(0, frame) / fps * 1000.0));
     }
 
+    private bool EnsureSource(Host host)
+    {
+        if (!string.IsNullOrEmpty(host.Path) && File.Exists(host.Path))
+            return true;
+        var element = string.IsNullOrEmpty(host.ElementId)
+            ? null
+            : _engine.Current?.Elements.FirstOrDefault(item => item.Id == host.ElementId);
+        if (element == null || string.IsNullOrWhiteSpace(element.Source))
+        {
+            ShowStatus("Choose a video file first.");
+            return false;
+        }
+        var path = ProjectStore.Resolve(_assetRoot, element.Source);
+        if (!File.Exists(path))
+        {
+            ShowStatus("Missing media file: " + element.Source);
+            return false;
+        }
+        host.Path = path;
+        host.Loop = element.Loop;
+        return true;
+    }
+
     private void SeekAndPause(Host host, long milliseconds)
     {
+        if (!EnsureSource(host))
+            return;
         milliseconds = Math.Max(0, milliseconds);
         host.Ended = false;
         if (host.Player.State is VLCState.Stopped or VLCState.NothingSpecial or VLCState.Ended or VLCState.Error || host.Player.Media == null)
@@ -580,6 +602,7 @@ public sealed class PlayerWindow : Window
         public SceneSurface? Foreground { get; set; }
         public ScaleTransform? ForegroundScale { get; set; }
         public Border? Bar { get; set; }
+        public string ElementId { get; set; } = "";
         public string Path { get; set; } = "";
         public bool Loop { get; set; }
         public bool Scrubbing { get; set; }
