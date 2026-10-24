@@ -43,6 +43,7 @@ public sealed class SceneSurface : UserControl
     private double? _clipWidth;
     private double? _clipHeight;
     private Func<SceneElement, bool>? _include;
+    private Func<SceneElement, bool>? _omit;
     private string? _backgroundElementId;
 
     public SceneSurface()
@@ -169,6 +170,8 @@ public sealed class SceneSurface : UserControl
         _canvas.Height = Height;
     }
 
+    public void SetOmit(Func<SceneElement, bool>? omit) => _omit = omit;
+
     public void SetAssetRoot(string assetRoot) => _assetRoot = assetRoot;
 
     public void SetGridVisible(bool visible) => _grid.IsVisible = visible && _design;
@@ -209,11 +212,34 @@ public sealed class SceneSurface : UserControl
 
         foreach (var element in scene.Elements.Select((value, index) => (value, index)).OrderBy(item => item.value.Z).ThenBy(item => item.index))
         {
-            if (_include != null && !_include(element.value))
+            if (!Shown(element.value))
                 continue;
             _canvas.Children.Add(CreateNode(element.value).Root);
         }
+
+        if (_design && !string.IsNullOrWhiteSpace(scene.BackgroundVideo))
+        {
+            var badge = new Border
+            {
+                Background = Painting.Brush("#E6101820"),
+                Padding = new Thickness(14, 8),
+                CornerRadius = new CornerRadius(10),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = "Background video  ·  " + System.IO.Path.GetFileName(scene.BackgroundVideo) + "  ·  press Play",
+                    Foreground = Brushes.White,
+                    FontSize = 18
+                }
+            };
+            Canvas.SetLeft(badge, 24);
+            Canvas.SetTop(badge, Math.Max(16, Height - 72));
+            _canvas.Children.Add(badge);
+        }
     }
+
+    private bool Shown(SceneElement element) =>
+        (_include == null || _include(element)) && (_omit == null || !_omit(element));
 
     public void Sync()
     {
@@ -222,7 +248,7 @@ public sealed class SceneSurface : UserControl
         var scene = Scene();
         if (scene == null)
             return;
-        var shown = scene.Elements.Where(element => _include == null || _include(element)).ToList();
+        var shown = scene.Elements.Where(Shown).ToList();
         if (_nodes.Count != shown.Count || shown.Any(element => !_nodes.ContainsKey(element.Id)))
         {
             Rebuild();
@@ -784,9 +810,10 @@ public sealed class SceneSurface : UserControl
         Canvas.SetTop(node.Root, element.Y - _originY);
         node.Root.Width = Math.Max(8, element.Width);
         node.Root.Height = Math.Max(8, element.Height);
-        var scale = Math.Max(0.01, element.EffectScale);
+        var scaleX = Math.Max(0.01, element.EffectScale * element.EffectScaleX);
+        var scaleY = Math.Max(0.01, element.EffectScale * element.EffectScaleY);
         var motion = new TransformGroup();
-        motion.Children.Add(new ScaleTransform(scale, scale));
+        motion.Children.Add(new ScaleTransform(scaleX, scaleY));
         motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
         motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
         node.Root.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);

@@ -87,6 +87,7 @@ public sealed class PlayerWindow : Window
             _fade = 0;
             _status.IsVisible = false;
             DisposeHosts();
+            _surface.SetOmit(null);
             _surface.Rebuild();
             CreateHosts();
             LayoutVideos();
@@ -153,14 +154,20 @@ public sealed class PlayerWindow : Window
     private void CreateHosts()
     {
         var vlc = MediaRuntime.Ensure();
-        if (vlc == null || _engine.Current == null)
+        var scene = _engine.Current;
+        if (vlc == null || scene == null)
         {
-            if (!MediaRuntime.IsAvailable && _engine.Current?.Elements.Any(element => element.Kind is ElementKind.Video or ElementKind.Audio) == true)
+            var wantsMedia = scene?.Elements.Any(element => element.Kind is ElementKind.Video or ElementKind.Audio) == true
+                || !string.IsNullOrWhiteSpace(scene?.BackgroundVideo);
+            if (!MediaRuntime.IsAvailable && wantsMedia)
                 ShowStatus(MediaRuntime.Status);
             return;
         }
 
-        foreach (var element in _engine.Current.Elements.Where(element => element.Kind is ElementKind.Video or ElementKind.Audio))
+        if (!string.IsNullOrWhiteSpace(scene.BackgroundVideo))
+            CreateBackdrop(vlc, scene);
+
+        foreach (var element in scene.Elements.Where(element => element.Kind is ElementKind.Video or ElementKind.Audio))
         {
             try
             {
@@ -195,7 +202,7 @@ public sealed class PlayerWindow : Window
                     host.Bar.IsVisible = element.ShowControls;
                     host.Bar.IsHitTestVisible = element.ShowControls;
                     var layer = new Grid { Children = { foregroundHost, host.Bar } };
-                    view = new VideoView { MediaPlayer = player, Content = layer };
+                    view = new VideoView { MediaPlayer = player, Content = layer, ZIndex = 1 };
                     host.View = view;
                     _overlay.Children.Add(view);
                 }
@@ -207,6 +214,61 @@ public sealed class PlayerWindow : Window
             }
         }
     }
+
+    private const string BackdropId = "__background";
+
+    private void CreateBackdrop(LibVLC vlc, Scene scene)
+    {
+        var path = ProjectStore.Resolve(_assetRoot, scene.BackgroundVideo);
+        if (!File.Exists(path))
+        {
+            ShowStatus("Missing background video: " + scene.BackgroundVideo);
+            return;
+        }
+
+        try
+        {
+            var width = Math.Max(1, (int)_engine.Live.Width);
+            var height = Math.Max(1, (int)_engine.Live.Height);
+            var player = new MediaPlayer(vlc)
+            {
+                EnableKeyInput = false,
+                EnableMouseInput = false,
+                Mute = !scene.BackgroundVideoSound,
+                Volume = scene.BackgroundVideoSound ? 80 : 0,
+                AspectRatio = width + ":" + height,
+                Scale = 0
+            };
+            var host = new Host(player, scene.BackgroundVideoLoop) { Path = path };
+            player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
+            host.Foreground = new SceneSurface();
+            host.Foreground.UsePlayback(_engine, _assetRoot);
+            host.Foreground.UseOverlay(0, 0, width, height, BackdropOwns, null);
+            host.Foreground.Rebuild();
+            host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
+            var foregroundHost = new LayoutTransformControl
+            {
+                LayoutTransform = host.ForegroundScale,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Top,
+                Child = host.Foreground
+            };
+            var view = new VideoView { MediaPlayer = player, Content = foregroundHost, ZIndex = 0 };
+            host.View = view;
+            _overlay.Children.Add(view);
+            _hosts[BackdropId] = host;
+            _surface.SetOmit(BackdropOwns);
+            _surface.Rebuild();
+            LaunchWhenReady(host, view);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus(ex.Message);
+        }
+    }
+
+    private bool BackdropOwns(SceneElement candidate) =>
+        candidate.IsVisible && candidate.Kind != ElementKind.Video && OverlayOwner(candidate) == null;
 
     private void ApplyMedia(MediaRequest request)
     {
@@ -255,6 +317,20 @@ public sealed class PlayerWindow : Window
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
         var originX = Math.Max(0, (Bounds.Width - _engine.Live.Width * scale) / 2);
         var originY = Math.Max(0, (Bounds.Height - _engine.Live.Height * scale) / 2);
+        if (_hosts.TryGetValue(BackdropId, out var backdrop) && backdrop.View != null)
+        {
+            Canvas.SetLeft(backdrop.View, originX);
+            Canvas.SetTop(backdrop.View, originY);
+            backdrop.View.Width = Math.Max(1, _engine.Live.Width * scale);
+            backdrop.View.Height = Math.Max(1, _engine.Live.Height * scale);
+            if (backdrop.ForegroundScale != null)
+            {
+                backdrop.ForegroundScale.ScaleX = scale;
+                backdrop.ForegroundScale.ScaleY = scale;
+            }
+            backdrop.Foreground?.MoveOverlay(0, 0, _engine.Live.Width, _engine.Live.Height);
+            backdrop.Foreground?.Sync();
+        }
         foreach (var element in scene.Elements.Where(element => element.Kind == ElementKind.Video))
         {
             if (!_hosts.TryGetValue(element.Id, out var host) || host.View == null)
@@ -403,6 +479,22 @@ public sealed class PlayerWindow : Window
         host.Player.SetPause(host.Player.State != VLCState.Paused);
         host.Ended = false;
         UpdateTransport(host);
+    }
+
+    private void LaunchWhenReady(Host host, VideoView view)
+    {
+        void Go()
+        {
+            if (host.Started)
+                return;
+            host.Started = true;
+            Dispatcher.UIThread.Post(() => StartMedia(host), DispatcherPriority.Background);
+        }
+
+        if (view.IsLoaded)
+            Go();
+        else
+            view.Loaded += (_, _) => Go();
     }
 
     private void StartMedia(Host host)
@@ -608,6 +700,7 @@ public sealed class PlayerWindow : Window
         public bool Scrubbing { get; set; }
         public bool FrameEditing { get; set; }
         public bool Ended { get; set; }
+        public bool Started { get; set; }
         public long? PendingSeekMs { get; set; }
         public double Fps { get; set; }
         public Button? Toggle { get; set; }

@@ -88,6 +88,9 @@ public sealed class Scene
     public string Name { get; set; } = "Scene";
     public string Background { get; set; } = "#101820";
     public string BackgroundImage { get; set; } = "";
+    public string BackgroundVideo { get; set; } = "";
+    public bool BackgroundVideoLoop { get; set; } = true;
+    public bool BackgroundVideoSound { get; set; }
     public List<SceneElement> Elements { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
 }
@@ -131,6 +134,7 @@ public sealed class SceneElement
     public bool ShowControls { get; set; } = true;
     public bool HasShadow { get; set; }
     public string TapEffect { get; set; } = "";
+    public double TapStrength { get; set; } = 1;
     public List<Interaction> Interactions { get; set; } = new();
 
     [JsonIgnore]
@@ -138,6 +142,12 @@ public sealed class SceneElement
 
     [JsonIgnore]
     public double EffectScale { get; set; } = 1;
+
+    [JsonIgnore]
+    public double EffectScaleX { get; set; } = 1;
+
+    [JsonIgnore]
+    public double EffectScaleY { get; set; } = 1;
 
     [JsonIgnore]
     public double EffectOpacity { get; set; } = 1;

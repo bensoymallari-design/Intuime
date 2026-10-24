@@ -24,6 +24,12 @@ public static class MediaRuntime
             PrepareLinuxLibraries();
             LibVLCSharp.Shared.Core.Initialize();
             var options = new List<string> { "--no-video-title-show", "--quiet" };
+            if (OperatingSystem.IsLinux())
+            {
+                // Embed into the player window. OpenGL outputs stay black on a software display.
+                options.Add("--vout=xcb_x11");
+                options.Add("--avcodec-hw=none");
+            }
             if (!HasAudioDevice())
                 options.Add("--aout=adummy");
             _vlc = new LibVLC(options.ToArray());

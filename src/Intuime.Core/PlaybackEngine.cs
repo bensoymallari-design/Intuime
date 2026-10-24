@@ -239,6 +239,9 @@ public sealed class PlaybackEngine
         live.Name = copy.Name;
         live.Background = copy.Background;
         live.BackgroundImage = copy.BackgroundImage;
+        live.BackgroundVideo = copy.BackgroundVideo;
+        live.BackgroundVideoLoop = copy.BackgroundVideoLoop;
+        live.BackgroundVideoSound = copy.BackgroundVideoSound;
         live.Elements = copy.Elements;
         live.Interactions = copy.Interactions;
     }

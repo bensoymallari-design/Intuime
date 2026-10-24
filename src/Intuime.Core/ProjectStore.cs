@@ -102,6 +102,8 @@ public static class ProjectStore
         {
             if (!string.IsNullOrWhiteSpace(scene.BackgroundImage))
                 yield return scene.BackgroundImage;
+            if (!string.IsNullOrWhiteSpace(scene.BackgroundVideo))
+                yield return scene.BackgroundVideo;
             foreach (var element in scene.Elements)
             {
                 if (!string.IsNullOrWhiteSpace(element.Source))

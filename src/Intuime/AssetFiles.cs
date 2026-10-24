@@ -60,6 +60,7 @@ public static class AssetFiles
         foreach (var scene in document.Scenes)
         {
             scene.BackgroundImage = Relocate(scene.BackgroundImage, fromRoot, toRoot);
+            scene.BackgroundVideo = Relocate(scene.BackgroundVideo, fromRoot, toRoot);
             foreach (var element in scene.Elements)
                 element.Source = Relocate(element.Source, fromRoot, toRoot);
         }

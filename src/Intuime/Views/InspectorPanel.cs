@@ -87,6 +87,22 @@ public sealed class InspectorPanel : StackPanel
                 scene.BackgroundImage = path;
                 session.Commit();
             });
+            Text("Background video", scene.BackgroundVideo, value =>
+            {
+                scene.BackgroundVideo = value;
+                session.TouchLive();
+            });
+            Browse("Choose video", async () =>
+            {
+                var path = await _browse("video");
+                if (path == null)
+                    return;
+                scene.BackgroundVideo = path;
+                session.Commit();
+            });
+            Check("Loop the video", scene.BackgroundVideoLoop, value => scene.BackgroundVideoLoop = value);
+            Check("Play the video sound", scene.BackgroundVideoSound, value => scene.BackgroundVideoSound = value);
+            Note("The video fills this scene in Play, behind the buttons, and can keep looping like a moving picture. Your buttons stay on top.");
             var start = new CheckBox { Content = "Start scene", IsChecked = session.Document.StartSceneId == scene.Id };
             start.IsCheckedChanged += (_, _) =>
             {
@@ -190,7 +206,35 @@ public sealed class InspectorPanel : StackPanel
         }));
         panel.Children.Add(new TextBlock
         {
-            Text = "Pick Pop, Bounce, Shake, or another motion. The button plays it here, and again when someone taps it in Play.",
+            Text = "How strong",
+            Foreground = Painting.Brush(Painting.Muted),
+            FontSize = 12
+        });
+        var strength = new Slider
+        {
+            Minimum = 0.4,
+            Maximum = 2.2,
+            Value = element.TapStrength <= 0 ? 1 : Math.Clamp(element.TapStrength, 0.4, 2.2)
+        };
+        strength.ValueChanged += (_, _) =>
+        {
+            if (_building)
+                return;
+            element.TapStrength = strength.Value;
+        };
+        strength.PointerReleased += (_, _) =>
+        {
+            if (_building)
+                return;
+            element.TapStrength = strength.Value;
+            _session?.Commit();
+            if (TapEffects.Known(element.TapEffect))
+                PreviewEffect?.Invoke(element.Id, element.TapEffect);
+        };
+        panel.Children.Add(strength);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Pick a motion. Drag How strong to make it bigger or smaller. The button plays it here, and again when someone taps it in Play.",
             TextWrapping = TextWrapping.Wrap,
             Foreground = Painting.Brush(Painting.Muted),
             FontSize = 12
