@@ -21,7 +21,7 @@ public partial class ComposerWindow : Window
     private readonly ScaleTransform _scale = new(0.55, 0.55);
     private readonly Border _frame = new() { BoxShadow = default };
     private List<SceneElement> _clipboard = new();
-    private PlayerWindow? _player;
+    private readonly List<PlayerWindow> _players = new();
     private bool _loadingLists;
     private bool _refreshingStage;
     private bool _allowClose;
@@ -272,7 +272,9 @@ public partial class ComposerWindow : Window
                 Background = Painting.Brush(scene.Background)
             });
             row.Children.Add(new TextBlock { Text = scene.Name, VerticalAlignment = VerticalAlignment.Center });
-            if (scene.Id == _session.Document.StartSceneId)
+            if (scene.Screen > 0)
+                row.Children.Add(new TextBlock { Text = DisplayScreens.Name(scene.Screen), Foreground = Painting.Brush(Painting.Muted), FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
+            if (DisplayScreens.IsStart(_session.Document, scene))
                 row.Children.Add(new TextBlock { Text = "Start", Foreground = Painting.Brush(Painting.Accent), FontSize = 11, VerticalAlignment = VerticalAlignment.Center });
             SceneList.Items.Add(new ListBoxItem { Content = row, Tag = scene.Id });
         }
@@ -349,14 +351,18 @@ public partial class ComposerWindow : Window
     {
         if (e.Source is TextBox)
             return;
-        if (_player is { IsVisible: true })
+        var player = _players.FirstOrDefault(item => item.IsVisible);
+        if (player != null)
         {
             if (e.Key == Key.Escape)
-                _player.Close();
+            {
+                foreach (var open in _players.Where(item => item.IsVisible).ToList())
+                    open.Close();
+            }
             else if (e.Key == Key.F11)
-                _player.ToggleFullScreen();
+                player.ToggleFullScreen();
             else
-                _player.PressKey(e.Key.ToString());
+                player.PressKey(e.Key.ToString());
             e.Handled = true;
             return;
         }
@@ -520,10 +526,10 @@ public partial class ComposerWindow : Window
     {
         if (_session.Document.Scenes.Count == 0)
             return;
-        _player?.Close();
-        _player = new PlayerWindow(ProjectStore.Clone(_session.Document), _session.AssetRoot, fullscreen);
-        _player.Show();
-        _player.Activate();
+        foreach (var open in _players.Where(item => item.IsVisible).ToList())
+            open.Close();
+        _players.Clear();
+        _players.AddRange(PlayerWindow.Open(ProjectStore.Clone(_session.Document), _session.AssetRoot, fullscreen, Screens));
     }
 
     private async Task NewExperience()
@@ -663,7 +669,8 @@ public partial class ComposerWindow : Window
     {
         if (_allowClose || !_session.IsDirty)
         {
-            _player?.Close();
+            foreach (var open in _players.Where(item => item.IsVisible).ToList())
+                open.Close();
             return;
         }
         e.Cancel = true;

@@ -792,4 +792,89 @@ public class ExperienceTests
         Assert.Equal(1, engine.Current.Elements.Single(e => e.Id == "title").EffectOpacity);
         Assert.Equal(0, engine.Current.Elements.Single(e => e.Id == "go").EffectShiftX);
     }
+
+    [Fact]
+    public void Each_screen_keeps_its_own_scene_and_its_own_start()
+    {
+        var go = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        go.Id = "go";
+        go.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "film" } }
+        });
+        var later = ElementFactory.Create(ElementKind.Button, 0, 100, 0, 1);
+        later.Id = "later";
+        later.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions =
+            {
+                new ExperienceAction { Kind = ActionKind.Wait, DurationMs = 500 },
+                new ExperienceAction { Kind = ActionKind.SetVariable, VariableName = "stayed", VariableValue = "yes" }
+            }
+        });
+        var home = new Scene { Id = "home", Name = "Home", Screen = 0, Elements = { go, later } };
+        var credits = new Scene { Id = "credits", Name = "Credits", Screen = 0 };
+        var loop = new Scene { Id = "loop", Name = "Loop", Screen = 1 };
+        var film = new Scene { Id = "film", Name = "Film", Screen = 1 };
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "home",
+            ScreenStarts = { new ScreenStart { Screen = 1, SceneId = "loop" } },
+            Variables = { new ExperienceVariable { Name = "stayed", Value = "no" } },
+            Scenes = { home, credits, loop, film },
+            Interactions =
+            {
+                new Interaction
+                {
+                    Id = "next",
+                    Trigger = TriggerKind.Key,
+                    Key = "Right",
+                    Actions = { new ExperienceAction { Kind = ActionKind.NextScene } }
+                }
+            }
+        };
+
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(document));
+        Assert.Equal(1, loaded.Scenes.Single(scene => scene.Id == "film").Screen);
+        Assert.Equal("loop", Assert.Single(loaded.ScreenStarts).SceneId);
+        Assert.Equal("home", loaded.StartSceneId);
+
+        var now = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(loaded, () => now);
+        engine.Start();
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("loop", engine.SceneFor(1)!.Id);
+        Assert.Equal("home", engine.Current!.Id);
+
+        engine.PointerUp("later");
+        engine.PointerUp("go");
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        now = now.AddMilliseconds(500);
+        engine.Tick();
+        Assert.Equal("yes", TextTemplates.Get(engine.Live, "stayed"));
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        engine.KeyPressed("Right", 0);
+        Assert.Equal("credits", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        engine.KeyPressed("Right", 1);
+        Assert.Equal("credits", engine.SceneFor(0)!.Id);
+        Assert.Equal("loop", engine.SceneFor(1)!.Id);
+
+        var session = new EditorSession();
+        session.Load(ProjectStore.Clone(document), null, "", markClean: true);
+        var moved = session.Document.Scenes.Single(scene => scene.Id == "loop");
+        session.SetScreenStart(moved);
+        Assert.True(DisplayScreens.IsStart(session.Document, moved));
+        moved.Screen = 0;
+        session.SetScreenStart(moved);
+        Assert.Equal("loop", session.Document.StartSceneId);
+        Assert.DoesNotContain(session.Document.ScreenStarts, item => item.SceneId == "loop");
+    }
 }
