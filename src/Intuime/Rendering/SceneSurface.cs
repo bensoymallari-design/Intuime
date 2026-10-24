@@ -15,6 +15,15 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
 {
     private readonly Border _page = new();
     private readonly Image _pageImage = new() { IsHitTestVisible = false, Stretch = Stretch.UniformToFill };
+    private readonly Canvas _background = new() { IsHitTestVisible = false };
+    private readonly Border _mediaFrame = new()
+    {
+        IsHitTestVisible = false,
+        IsVisible = false,
+        BorderBrush = Painting.Brush("#E7A23A"),
+        BorderThickness = new Thickness(3),
+        Background = Brushes.Transparent
+    };
     private readonly DesignGrid _grid = new() { IsHitTestVisible = false };
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
     private readonly Canvas _marqueeLayer = new() { IsHitTestVisible = false };
@@ -53,9 +62,11 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
 
     public SceneSurface()
     {
-        _page.Child = _pageImage;
+        _background.Children.Add(_pageImage);
+        _background.Children.Add(_mediaFrame);
         var root = new Grid();
         root.Children.Add(_page);
+        root.Children.Add(_background);
         root.Children.Add(_grid);
         root.Children.Add(_canvas);
         root.Children.Add(_marqueeLayer);
@@ -267,6 +278,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             _page.Background = Painting.Brush("#101820");
             _pageImage.Source = null;
             _pageImage.IsVisible = false;
+            _mediaFrame.IsVisible = false;
             return;
         }
 
@@ -280,13 +292,13 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             _page.Background = Brushes.Transparent;
             _pageImage.Source = null;
             _pageImage.IsVisible = false;
+            _mediaFrame.IsVisible = false;
         }
         else
         {
             _page.Background = Painting.Brush(scene.Background, "#101820");
-            var background = LoadBitmap(scene.BackgroundImage);
-            _pageImage.Source = background;
-            _pageImage.IsVisible = background != null;
+            _pageImage.Source = LoadBitmap(scene.BackgroundImage);
+            PlaceBackground(scene);
         }
 
         foreach (var element in scene.Elements.Select((value, index) => (value, index)).OrderBy(item => item.value.Z).ThenBy(item => item.index))
@@ -296,25 +308,45 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             _canvas.Children.Add(CreateNode(element.value).Root);
         }
 
-        if (_design && !string.IsNullOrWhiteSpace(scene.BackgroundVideo))
-        {
-            var badge = new Border
+    }
+
+    private void PlaceBackground(Scene scene)
+    {
+        var size = ClipSize();
+        var box = scene.BackgroundBox(size.Width, size.Height);
+        var hasImage = _pageImage.Source != null;
+        _pageImage.IsVisible = hasImage;
+        _pageImage.Stretch = scene.HasCustomBackgroundSize ? Stretch.Fill : Stretch.UniformToFill;
+        Canvas.SetLeft(_pageImage, box.X);
+        Canvas.SetTop(_pageImage, box.Y);
+        _pageImage.Width = Math.Max(1, box.Width);
+        _pageImage.Height = Math.Max(1, box.Height);
+
+        var showFrame = _design && (scene.HasCustomBackgroundSize || !string.IsNullOrWhiteSpace(scene.BackgroundVideo));
+        _mediaFrame.IsVisible = showFrame;
+        if (!showFrame)
+            return;
+        Canvas.SetLeft(_mediaFrame, box.X);
+        Canvas.SetTop(_mediaFrame, box.Y);
+        _mediaFrame.Width = Math.Max(1, box.Width);
+        _mediaFrame.Height = Math.Max(1, box.Height);
+        _mediaFrame.BorderThickness = scene.HasCustomBackgroundSize ? new Thickness(3) : new Thickness(0);
+        var label = string.IsNullOrWhiteSpace(scene.BackgroundVideo)
+            ? ""
+            : "Background video  ·  " + System.IO.Path.GetFileName(scene.BackgroundVideo) + "  ·  press Play";
+        _mediaFrame.Child = string.IsNullOrEmpty(label)
+            ? null
+            : new Border
             {
                 Background = Painting.Brush("#E6101820"),
                 Padding = new Thickness(14, 8),
                 CornerRadius = new CornerRadius(10),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(16),
                 IsHitTestVisible = false,
-                Child = new TextBlock
-                {
-                    Text = "Background video  ·  " + System.IO.Path.GetFileName(scene.BackgroundVideo) + "  ·  press Play",
-                    Foreground = Brushes.White,
-                    FontSize = 18
-                }
+                Child = new TextBlock { Text = label, Foreground = Brushes.White, FontSize = 18 }
             };
-            Canvas.SetLeft(badge, 24);
-            Canvas.SetTop(badge, Math.Max(16, Height - 72));
-            _canvas.Children.Add(badge);
-        }
     }
 
     private bool Shown(SceneElement element) =>
@@ -335,7 +367,12 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         }
 
         if (!_clearPage)
+        {
             _page.Background = Painting.Brush(scene.Background, "#101820");
+            if (_pageImage.Source == null && !string.IsNullOrWhiteSpace(scene.BackgroundImage))
+                _pageImage.Source = LoadBitmap(scene.BackgroundImage);
+            PlaceBackground(scene);
+        }
         foreach (var element in scene.Elements)
         {
             if (!_nodes.TryGetValue(element.Id, out var node))

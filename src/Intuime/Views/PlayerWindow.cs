@@ -293,22 +293,21 @@ public sealed class PlayerWindow : Window
 
         try
         {
-            var width = Math.Max(1, (int)_engine.Live.Width);
-            var height = Math.Max(1, (int)_engine.Live.Height);
+            var box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
             var player = new MediaPlayer(vlc)
             {
                 EnableKeyInput = false,
                 EnableMouseInput = false,
                 Mute = !scene.BackgroundVideoSound,
                 Volume = scene.BackgroundVideoSound ? 80 : 0,
-                AspectRatio = width + ":" + height,
+                AspectRatio = Math.Max(1, (int)Math.Round(box.Width)) + ":" + Math.Max(1, (int)Math.Round(box.Height)),
                 Scale = 0
             };
             var host = new Host(player, scene.BackgroundVideoLoop) { Path = path };
             player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
             host.Foreground = new SceneSurface();
             host.Foreground.UsePlayback(_engine, _assetRoot);
-            host.Foreground.UseOverlay(0, 0, width, height, BackdropOwns, null);
+            host.Foreground.UseOverlay(box.X, box.Y, box.Width, box.Height, BackdropIntersects, null);
             host.Foreground.Rebuild();
             host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
             var foregroundHost = new LayoutTransformControl
@@ -322,7 +321,7 @@ public sealed class PlayerWindow : Window
             host.View = view;
             _overlay.Children.Add(view);
             _hosts[BackdropId] = host;
-            _surface.SetOmit(BackdropOwns);
+            _surface.SetOmit(BackdropCovers);
             _surface.Rebuild();
             LaunchWhenReady(host, view);
         }
@@ -332,8 +331,35 @@ public sealed class PlayerWindow : Window
         }
     }
 
-    private bool BackdropOwns(SceneElement candidate) =>
-        candidate.IsVisible && candidate.Kind != ElementKind.Video && OverlayOwner(candidate) == null;
+    private bool BackdropIntersects(SceneElement candidate)
+    {
+        if (!BackdropCandidate(candidate, out var box))
+            return false;
+        return candidate.X < box.X + box.Width &&
+               candidate.X + candidate.Width > box.X &&
+               candidate.Y < box.Y + box.Height &&
+               candidate.Y + candidate.Height > box.Y;
+    }
+
+    private bool BackdropCovers(SceneElement candidate)
+    {
+        if (!BackdropCandidate(candidate, out var box))
+            return false;
+        return candidate.X >= box.X &&
+               candidate.Y >= box.Y &&
+               candidate.X + candidate.Width <= box.X + box.Width &&
+               candidate.Y + candidate.Height <= box.Y + box.Height;
+    }
+
+    private bool BackdropCandidate(SceneElement candidate, out (double X, double Y, double Width, double Height) box)
+    {
+        box = default;
+        var scene = _engine.Current;
+        if (scene == null || !candidate.IsVisible || candidate.Kind == ElementKind.Video || OverlayOwner(candidate) != null)
+            return false;
+        box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
+        return true;
+    }
 
     private void ApplyMedia(MediaRequest request)
     {
@@ -384,16 +410,17 @@ public sealed class PlayerWindow : Window
         var originY = Math.Max(0, (Bounds.Height - _engine.Live.Height * scale) / 2);
         if (_hosts.TryGetValue(BackdropId, out var backdrop) && backdrop.View != null)
         {
-            Canvas.SetLeft(backdrop.View, originX);
-            Canvas.SetTop(backdrop.View, originY);
-            backdrop.View.Width = Math.Max(1, _engine.Live.Width * scale);
-            backdrop.View.Height = Math.Max(1, _engine.Live.Height * scale);
+            var box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
+            Canvas.SetLeft(backdrop.View, originX + box.X * scale);
+            Canvas.SetTop(backdrop.View, originY + box.Y * scale);
+            backdrop.View.Width = Math.Max(1, box.Width * scale);
+            backdrop.View.Height = Math.Max(1, box.Height * scale);
             if (backdrop.ForegroundScale != null)
             {
                 backdrop.ForegroundScale.ScaleX = scale;
                 backdrop.ForegroundScale.ScaleY = scale;
             }
-            backdrop.Foreground?.MoveOverlay(0, 0, _engine.Live.Width, _engine.Live.Height);
+            backdrop.Foreground?.MoveOverlay(box.X, box.Y, box.Width, box.Height);
             backdrop.Foreground?.Sync();
         }
         foreach (var element in scene.Elements.Where(element => element.Kind == ElementKind.Video))
