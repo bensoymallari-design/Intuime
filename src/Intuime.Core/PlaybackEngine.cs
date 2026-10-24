@@ -8,6 +8,7 @@ public sealed class PlaybackEngine
     private readonly HashSet<string> _timerOnce = new();
     private readonly List<Tween> _tweens = new();
     private readonly List<RunningEffect> _effects = new();
+    private readonly List<RunningEffect> _entrances = new();
     private string? _lastTapId;
     private DateTime _lastTapAt;
     private int _depth;
@@ -47,7 +48,7 @@ public sealed class PlaybackEngine
     public void Tick()
     {
         var now = _clock();
-        var animated = AdvanceTweens(now) || AdvanceEffects(now);
+        var animated = AdvanceTweens(now) || AdvanceEffects(now) || AdvanceEntrances(now);
         var waited = false;
         foreach (var sequence in _sequences.ToList())
         {
@@ -214,6 +215,8 @@ public sealed class PlaybackEngine
         _sequences.Clear();
         _tweens.Clear();
         _effects.Clear();
+        _entrances.Clear();
+        BeginEntrances(Current);
         SceneJustRaised = true;
         SceneChanged?.Invoke();
 
@@ -512,11 +515,53 @@ public sealed class PlaybackEngine
         }
     }
 
+    private void BeginEntrances(Scene scene)
+    {
+        var now = _clock();
+        foreach (var element in scene.Elements)
+        {
+            if (!element.IsVisible || !EntranceEffects.Known(element.Entrance))
+                continue;
+            EntranceEffects.Apply(element, element.Entrance, 0);
+            _entrances.Add(new RunningEffect(
+                element,
+                element.Entrance.Trim(),
+                now.AddMilliseconds(EntranceEffects.DelayMs(element)),
+                EntranceEffects.DurationMs(element)));
+        }
+    }
+
+    private bool AdvanceEntrances(DateTime now)
+    {
+        if (_entrances.Count == 0)
+            return false;
+        foreach (var effect in _entrances.ToList())
+        {
+            var elapsed = (now - effect.Start).TotalMilliseconds;
+            if (elapsed < 0)
+            {
+                EntranceEffects.Apply(effect.Element, effect.Name, 0);
+                continue;
+            }
+            var t = elapsed / effect.DurationMs;
+            if (t >= 1)
+            {
+                EntranceEffects.Reset(effect.Element);
+                _entrances.Remove(effect);
+                continue;
+            }
+            EntranceEffects.Apply(effect.Element, effect.Name, t);
+        }
+        return true;
+    }
+
     private void StartEffect(SceneElement element, string? name)
     {
         if (!TapEffects.Known(name))
             return;
         _effects.RemoveAll(effect => effect.Element.Id == element.Id);
+        _entrances.RemoveAll(effect => effect.Element.Id == element.Id);
+        TapEffects.Reset(element);
         _effects.Add(new RunningEffect(element, name!.Trim(), _clock(), TapEffects.DurationMs(name!)));
     }
 

@@ -40,6 +40,7 @@ public partial class ComposerWindow : Window
             EffectHost.IsVisible = _inspector.PinnedEffect != null;
         };
         _inspector.PreviewEffect += (id, name) => _surface.PreviewTap(id, name);
+        _inspector.PreviewEntrance += (id, name, delay, duration) => _surface.PreviewEntrance(id, name, delay, duration);
         _zoomHost.LayoutTransform = _scale;
         _frame.Child = _surface;
         _zoomHost.Child = _frame;
@@ -59,6 +60,7 @@ public partial class ComposerWindow : Window
         _session.StructureChanged += QueueReloadLists;
         _session.SelectionChanged += () =>
         {
+            _surface.StopMotionPreview();
             HighlightLists();
             _inspector.Refresh();
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>

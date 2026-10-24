@@ -85,11 +85,11 @@ public static class SampleExperiences
             Opacity = 0.95,
             Z = 0
         });
-        scene.Elements.Add(Label("attract-kicker", "Kicker", 0, 250, 1920, 36, "LUMEN GALLERY", 20, "#E7A23A", center: true));
-        scene.Elements.Add(Label("attract-title", "Title", 140, 310, 1640, 170, "Come closer.", 84, "#F4F7FB", center: true, bold: true));
-        scene.Elements.Add(Label("attract-sub", "Subtitle", 300, 500, 1320, 100,
-            "A touchscreen tour of the collection.\nTap anywhere to begin.", 30, "#B7C6D6", center: true));
-        var begin = Button("begin", "Begin", 760, 660, 400, 88, "Begin");
+        scene.Elements.Add(Arrive(Label("attract-kicker", "Kicker", 0, 250, 1920, 36, "LUMEN GALLERY", 20, "#E7A23A", center: true), "Fade in", 0, 500));
+        scene.Elements.Add(Arrive(Label("attract-title", "Title", 140, 310, 1640, 170, "Come closer.", 84, "#F4F7FB", center: true, bold: true), "Slide from below", 150, 800));
+        scene.Elements.Add(Arrive(Label("attract-sub", "Subtitle", 300, 500, 1320, 100,
+            "A touchscreen tour of the collection.\nTap anywhere to begin.", 30, "#B7C6D6", center: true), "Fade in", 400, 700));
+        var begin = Arrive(Button("begin", "Begin", 760, 660, 400, 88, "Begin"), "Bounce", 650, 900);
         begin.Interactions.Add(On(TriggerKind.Tap, "begin-tap", Go("home")));
         scene.Elements.Add(begin);
         scene.Elements.Add(Clock("attract-clock", 72, 990, 320, 52, 28));
@@ -102,14 +102,14 @@ public static class SampleExperiences
     {
         var scene = NewScene("home", "Home", "#081018");
         Idle(scene);
-        scene.Elements.Add(Label("home-kicker", "Kicker", 72, 48, 700, 28, "LUMEN GALLERY", 16, "#E7A23A"));
-        scene.Elements.Add(Label("home-title", "Title", 72, 88, 1100, 72, "Where to?", 56, "#F4F7FB", bold: true));
-        scene.Elements.Add(Label("home-sub", "Subtitle", 72, 168, 800, 40, "Touch a path to walk into it.", 22, "#9BB0C3"));
+        scene.Elements.Add(Arrive(Label("home-kicker", "Kicker", 72, 48, 700, 28, "LUMEN GALLERY", 16, "#E7A23A"), "Fade in", 0, 450));
+        scene.Elements.Add(Arrive(Label("home-title", "Title", 72, 88, 1100, 72, "Where to?", 56, "#F4F7FB", bold: true), "Fade in", 80, 600));
+        scene.Elements.Add(Arrive(Label("home-sub", "Subtitle", 72, 168, 800, 40, "Touch a path to walk into it.", 22, "#9BB0C3"), "Fade in", 220, 600));
         scene.Elements.Add(Clock("home-clock", 1500, 56, 348, 52, 28));
-        Card(scene, "collection", "The collection", "Three works, one room at a time.", 72, 250, "#143044", "collection");
-        Card(scene, "hours", "Today's hours", "The clock, the talks, the room tone.", 988, 250, "#1C2A22", "hours");
-        Card(scene, "map", "Floor map", "Tap a room, then step inside.", 72, 630, "#2A2418", "map");
-        Card(scene, "visit", "Plan a visit", "Count the group and hold tickets.", 988, 630, "#2A1C28", "visit");
+        Card(scene, "collection", "The collection", "Three works, one room at a time.", 72, 250, "#143044", "collection", "Slide from left", 200);
+        Card(scene, "hours", "Today's hours", "The clock, the talks, the room tone.", 988, 250, "#1C2A22", "hours", "Slide from right", 320);
+        Card(scene, "map", "Floor map", "Tap a room, then step inside.", 72, 630, "#2A2418", "map", "Slide from below", 440);
+        Card(scene, "visit", "Plan a visit", "Count the group and hold tickets.", 988, 630, "#2A1C28", "visit", "Pop", 560);
         return scene;
     }
 
@@ -227,7 +227,7 @@ public static class SampleExperiences
         Idle(scene);
         Header(scene, "Plan a visit", "home");
         scene.Elements.Add(Label("visit-lead", "Lead", 72, 170, 760, 50, "How many are coming?", 28, "#D5E0EA"));
-        scene.Elements.Add(new SceneElement
+        scene.Elements.Add(Arrive(new SceneElement
         {
             Id = "party-counter",
             Name = "Group size",
@@ -247,9 +247,9 @@ public static class SampleExperiences
             Min = 1,
             Max = 12,
             HasRange = true
-        });
+        }, "Pop", 180, 700));
         scene.Elements.Add(Label("party-readout", "Readout", 72, 380, 760, 70, "Tickets held: {{partySize}}", 36, "#F4F7FB", bold: true));
-        var reserve = Button("reserve", "Reserve", 72, 490, 300, 76, "Reserve");
+        var reserve = Arrive(Button("reserve", "Reserve", 72, 490, 300, 76, "Reserve"), "Bounce", 360, 860);
         reserve.Interactions.Add(On(TriggerKind.Tap, "reserve-tap", new ExperienceAction
         {
             Kind = ActionKind.SetVariable,
@@ -283,12 +283,12 @@ public static class SampleExperiences
         return scene;
     }
 
-    private static void Card(Scene scene, string id, string title, string body, double x, double y, string fill, string target)
+    private static void Card(Scene scene, string id, string title, string body, double x, double y, string fill, string target, string entrance, int delayMs)
     {
-        scene.Elements.Add(Rect($"card-{id}-bg", title, x, y, 860, 340, fill, radius: 24));
-        scene.Elements.Add(Label($"card-{id}-title", title, x + 36, y + 48, 780, 70, title, 40, "#F4F7FB", bold: true));
-        scene.Elements.Add(Label($"card-{id}-body", body, x + 36, y + 140, 760, 80, body, 24, "#C5D4E2"));
-        var hotspot = Hotspot($"card-{id}", title, x, y, 860, 340);
+        scene.Elements.Add(Arrive(Rect($"card-{id}-bg", title, x, y, 860, 340, fill, radius: 24), entrance, delayMs, 700));
+        scene.Elements.Add(Arrive(Label($"card-{id}-title", title, x + 36, y + 48, 780, 70, title, 40, "#F4F7FB", bold: true), entrance, delayMs, 700));
+        scene.Elements.Add(Arrive(Label($"card-{id}-body", body, x + 36, y + 140, 760, 80, body, 24, "#C5D4E2"), entrance, delayMs, 700));
+        var hotspot = Arrive(Hotspot($"card-{id}", title, x, y, 860, 340), entrance, delayMs, 700);
         hotspot.Interactions.Add(On(TriggerKind.Tap, $"card-{id}-tap", Go(target)));
         scene.Elements.Add(hotspot);
     }
@@ -315,13 +315,21 @@ public static class SampleExperiences
 
     private static void Header(Scene scene, string title, string backTarget)
     {
-        var back = Button($"{scene.Id}-back", "Back", 72, 36, 180, 64, "Back");
+        var back = Arrive(Button($"{scene.Id}-back", "Back", 72, 36, 180, 64, "Back"), "Slide from left", 0, 560);
         back.Fill = "#163246";
         back.Foreground = "#F4F7FB";
         back.Interactions.Add(On(TriggerKind.Tap, $"{scene.Id}-back-tap", Go(backTarget)));
         scene.Elements.Add(back);
-        scene.Elements.Add(Label($"{scene.Id}-title", "Title", 280, 36, 1100, 64, title, 40, "#F4F7FB", bold: true));
+        scene.Elements.Add(Arrive(Label($"{scene.Id}-title", "Title", 280, 36, 1100, 64, title, 40, "#F4F7FB", bold: true), "Fade in", 120, 640));
         scene.Elements.Add(Clock($"{scene.Id}-clock", 1500, 40, 348, 52, 26));
+    }
+
+    private static SceneElement Arrive(SceneElement element, string entrance, int delayMs, int durationMs)
+    {
+        element.Entrance = entrance;
+        element.EntranceDelayMs = delayMs;
+        element.EntranceMs = durationMs;
+        return element;
     }
 
     private static Scene NewScene(string id, string name, string background) => new()

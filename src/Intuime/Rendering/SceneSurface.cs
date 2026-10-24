@@ -31,6 +31,9 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private readonly DispatcherTimer _preview;
     private string? _previewId;
     private string _previewName = "";
+    private bool _previewEntrance;
+    private int _previewDelayMs;
+    private int _previewDurationMs;
     private DateTime _previewStart;
     private EditorSession? _session;
     private PlaybackEngine? _engine;
@@ -76,7 +79,33 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             return;
         _previewId = elementId;
         _previewName = effectName;
+        _previewEntrance = false;
         _previewStart = DateTime.UtcNow;
+        _preview.Start();
+    }
+
+    public void StopMotionPreview() => StopPreview();
+
+    public void PreviewEntrance(string elementId, string effectName, int delayMs, int durationMs)
+    {
+        StopPreview();
+        var element = Lookup(elementId);
+        if (!_design || element == null)
+            return;
+        if (!EntranceEffects.Known(effectName))
+        {
+            EntranceEffects.Reset(element);
+            PaintEffect(element);
+            return;
+        }
+        _previewId = elementId;
+        _previewName = effectName;
+        _previewEntrance = true;
+        _previewDelayMs = Math.Max(0, delayMs);
+        _previewDurationMs = Math.Max(150, durationMs);
+        _previewStart = DateTime.UtcNow;
+        EntranceEffects.Apply(element, effectName, 0);
+        PaintEffect(element);
         _preview.Start();
     }
 
@@ -91,6 +120,21 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         if (element == null)
         {
             StopPreview();
+            return;
+        }
+        if (_previewEntrance)
+        {
+            var elapsed = (DateTime.UtcNow - _previewStart).TotalMilliseconds - _previewDelayMs;
+            if (elapsed >= _previewDurationMs)
+            {
+                EntranceEffects.Reset(element);
+                PaintEffect(element);
+                _previewId = null;
+                _preview.Stop();
+                return;
+            }
+            EntranceEffects.Apply(element, _previewName, elapsed < 0 ? 0 : elapsed / _previewDurationMs);
+            PaintEffect(element);
             return;
         }
         var t = (DateTime.UtcNow - _previewStart).TotalMilliseconds / Math.Max(1, TapEffects.DurationMs(_previewName));
@@ -109,6 +153,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private void StopPreview()
     {
         _preview.Stop();
+        _previewEntrance = false;
         if (_previewId == null)
             return;
         var element = Lookup(_previewId);
@@ -193,7 +238,13 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         {
             if (!Shown(element) || !element.IsVisible || !ElementFactory.CapturesPointer(element))
                 continue;
-            var rect = new Rect(element.X - _originX, element.Y - _originY, Math.Max(8, element.Width), Math.Max(8, element.Height));
+            if (element.Opacity * element.EffectOpacity <= 0.04)
+                continue;
+            var rect = new Rect(
+                element.X + element.EffectShiftX - _originX,
+                element.Y + element.EffectShiftY - _originY,
+                Math.Max(8, element.Width),
+                Math.Max(8, element.Height));
             if (rect.Contains(point))
                 return true;
         }
@@ -849,7 +900,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         var hidden = !element.IsVisible;
         var opacity = Math.Clamp(element.Opacity * element.EffectOpacity, 0, 1);
         node.Root.Opacity = hidden ? (_design ? Math.Min(element.Opacity, 0.35) : 0) : opacity;
-        node.Root.IsHitTestVisible = _design || (element.IsVisible && ElementFactory.CapturesPointer(element));
+        node.Root.IsHitTestVisible = _design || (element.IsVisible && opacity > 0.04 && ElementFactory.CapturesPointer(element));
         if (!_design && element.IsVisible && ElementFactory.CapturesPointer(element))
             node.Root.Cursor = new Cursor(StandardCursorType.Hand);
     }
