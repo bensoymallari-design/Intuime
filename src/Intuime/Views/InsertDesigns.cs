@@ -56,8 +56,8 @@ public static class InsertDesigns
     public static void ShowOnHover(Control anchor, ElementKind kind, Action<ElementPreset> insert)
     {
         var hover = new Hover(kind, insert);
-        anchor.PointerEntered += (_, _) => hover.Show(anchor);
-        anchor.PointerExited += (_, _) => hover.ScheduleClose();
+        anchor.PointerEntered += (_, _) => hover.Queue(anchor);
+        anchor.PointerExited += (_, _) => hover.Leave();
     }
 
     private static Control Swatch(ElementKind kind, SceneElement element, string sample)
@@ -113,9 +113,11 @@ public static class InsertDesigns
     private sealed class Hover
     {
         private static Hover? _open;
+        private static readonly DispatcherTimer SwitchTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
+        private static Action? _switchTo;
         private readonly Popup _popup;
         private readonly ScrollViewer _scroller;
-        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(280) };
+        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(320) };
         private Control? _anchor;
         private object? _tip;
 
@@ -162,7 +164,12 @@ public static class InsertDesigns
                 MinWidth = 220,
                 Child = _scroller
             };
-            host.PointerEntered += (_, _) => _timer.Stop();
+            host.PointerEntered += (_, _) =>
+            {
+                _switchTo = null;
+                SwitchTimer.Stop();
+                _timer.Stop();
+            };
             host.PointerExited += (_, _) => _timer.Start();
             _popup = new Popup
             {
@@ -172,11 +179,36 @@ public static class InsertDesigns
                 PlacementGravity = PopupGravity.BottomRight,
                 PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.SlideY,
                 ShouldUseOverlayLayer = false,
-                IsLightDismissEnabled = false,
-                HorizontalOffset = -4
+                IsLightDismissEnabled = false
             };
             _timer.Tick += (_, _) => Close();
+            if (SwitchTimer.Tag == null)
+            {
+                SwitchTimer.Tag = "ready";
+                SwitchTimer.Tick += (_, _) =>
+                {
+                    SwitchTimer.Stop();
+                    var show = _switchTo;
+                    _switchTo = null;
+                    show?.Invoke();
+                };
+            }
         }
+
+        public void Queue(Control anchor)
+        {
+            _open?.Hold();
+            if (_open == null || _open == this)
+            {
+                Show(anchor);
+                return;
+            }
+            _switchTo = () => Show(anchor);
+            SwitchTimer.Stop();
+            SwitchTimer.Start();
+        }
+
+        public void Hold() => _timer.Stop();
 
         public void Show(Control anchor)
         {
@@ -194,17 +226,26 @@ public static class InsertDesigns
             var window = TopLevel.GetTopLevel(anchor);
             if (window == null)
                 return;
-            var corner = anchor.TranslatePoint(new Point(anchor.Bounds.Width, 0), window);
+            var corner = anchor.TranslatePoint(new Point(0, 0), window);
             if (corner == null)
                 return;
+            var edge = anchor.Parent is Visual panel
+                ? panel.TranslatePoint(new Point(panel.Bounds.Width, 0), window)
+                : null;
+            var x = (edge?.X ?? corner.Value.X + anchor.Bounds.Width) + 8;
             _scroller.MaxHeight = Math.Min(440, Math.Max(220, window.Bounds.Height - 120));
             _popup.PlacementTarget = window;
-            _popup.PlacementRect = new Rect(corner.Value.X, corner.Value.Y, 1, 1);
+            _popup.PlacementRect = new Rect(x, corner.Value.Y, 1, 1);
             if (!_popup.IsOpen)
                 _popup.Open();
         }
 
-        public void ScheduleClose() => _timer.Start();
+        public void Leave()
+        {
+            _switchTo = null;
+            SwitchTimer.Stop();
+            _timer.Start();
+        }
 
         private void Close()
         {
