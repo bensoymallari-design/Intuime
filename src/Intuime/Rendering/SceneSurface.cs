@@ -5,12 +5,13 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
+using Avalonia.Rendering;
 using Avalonia.Threading;
 using Intuime.Core;
 
 namespace Intuime.Rendering;
 
-public sealed class SceneSurface : UserControl
+public sealed class SceneSurface : UserControl, ICustomHitTest
 {
     private readonly Border _page = new();
     private readonly Image _pageImage = new() { IsHitTestVisible = false, Stretch = Stretch.UniformToFill };
@@ -45,6 +46,7 @@ public sealed class SceneSurface : UserControl
     private Func<SceneElement, bool>? _include;
     private Func<SceneElement, bool>? _omit;
     private string? _backgroundElementId;
+    private bool _passThrough;
 
     public SceneSurface()
     {
@@ -171,6 +173,32 @@ public sealed class SceneSurface : UserControl
     }
 
     public void SetOmit(Func<SceneElement, bool>? omit) => _omit = omit;
+
+    public void PassClicksThrough()
+    {
+        _passThrough = true;
+        Background = null;
+        _page.IsHitTestVisible = false;
+        _canvas.Background = null;
+    }
+
+    public bool HitTest(Point point)
+    {
+        if (!_passThrough)
+            return true;
+        var scene = Scene();
+        if (scene == null)
+            return false;
+        foreach (var element in scene.Elements)
+        {
+            if (!Shown(element) || !element.IsVisible || !ElementFactory.CapturesPointer(element))
+                continue;
+            var rect = new Rect(element.X - _originX, element.Y - _originY, Math.Max(8, element.Width), Math.Max(8, element.Height));
+            if (rect.Contains(point))
+                return true;
+        }
+        return false;
+    }
 
     public void SetAssetRoot(string assetRoot) => _assetRoot = assetRoot;
 
@@ -614,7 +642,7 @@ public sealed class SceneSurface : UserControl
 
     private void OnCanvasPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source != _canvas)
+        if (_passThrough || e.Source != _canvas)
             return;
         if (!_design)
         {

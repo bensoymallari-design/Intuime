@@ -16,7 +16,7 @@ static class LinuxWebFrame
     private static bool _leftWasDown;
     private static bool _rightWasDown;
 
-    public static void Show(IntPtr playerWindow, int x, int y, int width, int height)
+    public static void Show(IntPtr playerWindow, int x, int y, int width, int height, IntPtr skip = default)
     {
         if (!OperatingSystem.IsLinux() || playerWindow == IntPtr.Zero || width < 1 || height < 1)
             return;
@@ -26,6 +26,8 @@ static class LinuxWebFrame
 
         foreach (var child in Children(display, playerWindow))
         {
+            if (child == skip || child == IntPtr.Zero)
+                continue;
             if (!Owned.Contains(child) && !IsTiny(display, child))
                 continue;
             Owned.Add(child);
@@ -54,6 +56,31 @@ static class LinuxWebFrame
         _leftWasDown = left;
         _rightWasDown = right;
         return edges;
+    }
+
+    public static void ShapeTo(IntPtr window, IReadOnlyList<(int X, int Y, int Width, int Height)> rectangles)
+    {
+        if (!OperatingSystem.IsLinux() || window == IntPtr.Zero || rectangles.Count == 0)
+            return;
+        var display = Display();
+        if (display == IntPtr.Zero)
+            return;
+        var native = new XRectangle[rectangles.Count];
+        for (var i = 0; i < rectangles.Count; i++)
+        {
+            var rect = rectangles[i];
+            native[i] = new XRectangle
+            {
+                X = (short)Math.Clamp(rect.X, short.MinValue, short.MaxValue),
+                Y = (short)Math.Clamp(rect.Y, short.MinValue, short.MaxValue),
+                Width = (ushort)Math.Clamp(rect.Width, 1, ushort.MaxValue),
+                Height = (ushort)Math.Clamp(rect.Height, 1, ushort.MaxValue)
+            };
+        }
+        XShapeCombineRectangles(display, window, ShapeBounding, 0, 0, native, native.Length, ShapeSet, 0);
+        XShapeCombineRectangles(display, window, ShapeInput, 0, 0, native, native.Length, ShapeSet, 0);
+        XRaiseWindow(display, window);
+        XFlush(display);
     }
 
     public static void Hide()
@@ -125,6 +152,19 @@ static class LinuxWebFrame
         return _display;
     }
 
+    private const int ShapeBounding = 0;
+    private const int ShapeInput = 2;
+    private const int ShapeSet = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct XRectangle
+    {
+        public short X;
+        public short Y;
+        public ushort Width;
+        public ushort Height;
+    }
+
     private delegate int XErrorHandler(IntPtr display, IntPtr errorEvent);
 
     [DllImport("libX11.so.6")]
@@ -159,4 +199,10 @@ static class LinuxWebFrame
 
     [DllImport("libX11.so.6")]
     private static extern int XKeysymToKeycode(IntPtr display, uint keysym);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XRaiseWindow(IntPtr display, IntPtr window);
+
+    [DllImport("libXext.so.6")]
+    private static extern void XShapeCombineRectangles(IntPtr display, IntPtr window, int destination, int x, int y, XRectangle[] rectangles, int count, int operation, int ordering);
 }
