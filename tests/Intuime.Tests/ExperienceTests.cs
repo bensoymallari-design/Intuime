@@ -446,6 +446,55 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Background_video_and_effect_strength_round_trip()
+    {
+        var scene = new Scene
+        {
+            Id = "city",
+            Name = "City",
+            BackgroundVideo = "assets/city.mp4",
+            BackgroundVideoLoop = false,
+            BackgroundVideoSound = true
+        };
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.TapEffect = "Squash";
+        button.TapStrength = 1.6;
+        scene.Elements.Add(button);
+        var document = new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } };
+        var clone = ProjectStore.Clone(document).Scenes.Single();
+        Assert.Equal("assets/city.mp4", clone.BackgroundVideo);
+        Assert.False(clone.BackgroundVideoLoop);
+        Assert.True(clone.BackgroundVideoSound);
+        Assert.Equal("Squash", clone.Elements.Single().TapEffect);
+        Assert.Equal(1.6, clone.Elements.Single().TapStrength);
+        Assert.True(new Scene().BackgroundVideoLoop);
+        Assert.False(new Scene().BackgroundVideoSound);
+
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(document, () => now);
+        engine.Start();
+        var live = engine.Current!.Elements.Single();
+        engine.PointerUp(live.Id);
+        now = now.AddMilliseconds(260);
+        engine.Tick();
+        Assert.True(live.EffectScaleX > live.EffectScaleY);
+        Assert.True(live.EffectScaleX > 1.2);
+        Assert.True(live.EffectScaleY < 0.9);
+
+        var pop = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 2);
+        pop.TapEffect = "Pop";
+        pop.TapStrength = 2;
+        var popScene = new Scene { Id = "only", Elements = { pop } };
+        var popEngine = new PlaybackEngine(new ExperienceDocument { StartSceneId = "only", Scenes = { popScene } }, () => now);
+        popEngine.Start();
+        var popped = popEngine.Current!.Elements.Single();
+        popEngine.PointerUp(popped.Id);
+        now = now.AddMilliseconds(260);
+        popEngine.Tick();
+        Assert.True(popped.EffectScale > 1.45);
+    }
+
+    [Fact]
     public void Tap_effect_plays_then_rests_and_round_trips()
     {
         var button = ElementFactory.Create(ElementKind.Button, 10, 20, 0, 1);
