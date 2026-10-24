@@ -91,6 +91,22 @@ public sealed class Scene
     public string BackgroundVideo { get; set; } = "";
     public bool BackgroundVideoLoop { get; set; } = true;
     public bool BackgroundVideoSound { get; set; }
+    public bool BackgroundFill { get; set; } = true;
+    public double BackgroundX { get; set; }
+    public double BackgroundY { get; set; }
+    public double BackgroundWidth { get; set; }
+    public double BackgroundHeight { get; set; }
+
+    [JsonIgnore]
+    public bool HasCustomBackgroundSize =>
+        !BackgroundFill && BackgroundWidth >= 8 && BackgroundHeight >= 8;
+
+    public (double X, double Y, double Width, double Height) BackgroundBox(double sceneWidth, double sceneHeight)
+    {
+        if (!HasCustomBackgroundSize)
+            return (0, 0, Math.Max(1, sceneWidth), Math.Max(1, sceneHeight));
+        return (BackgroundX, BackgroundY, BackgroundWidth, BackgroundHeight);
+    }
     public List<SceneElement> Elements { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
 }

@@ -103,7 +103,45 @@ public sealed class InspectorPanel : StackPanel
             });
             Check("Loop the video", scene.BackgroundVideoLoop, value => scene.BackgroundVideoLoop = value);
             Check("Play the video sound", scene.BackgroundVideoSound, value => scene.BackgroundVideoSound = value);
-            Note("The video fills this scene in Play, behind the buttons, and can keep looping like a moving picture. Your buttons stay on top.");
+            if (HasBackgroundMedia(scene))
+            {
+                var box = scene.BackgroundBox(session.Document.Width, session.Document.Height);
+                Number("X", box.X, value =>
+                {
+                    RememberBackgroundSize(scene, session);
+                    scene.BackgroundX = value;
+                });
+                Number("Y", box.Y, value =>
+                {
+                    RememberBackgroundSize(scene, session);
+                    scene.BackgroundY = value;
+                });
+                Number("Width", box.Width, value =>
+                {
+                    RememberBackgroundSize(scene, session);
+                    scene.BackgroundWidth = Math.Max(8, value);
+                });
+                Number("Height", box.Height, value =>
+                {
+                    RememberBackgroundSize(scene, session);
+                    scene.BackgroundHeight = Math.Max(8, value);
+                });
+                var fill = new Button { Content = "Fill the scene", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
+                fill.Click += (_, _) =>
+                {
+                    if (_building)
+                        return;
+                    scene.BackgroundFill = true;
+                    scene.BackgroundX = 0;
+                    scene.BackgroundY = 0;
+                    scene.BackgroundWidth = 0;
+                    scene.BackgroundHeight = 0;
+                    session.Commit();
+                    Refresh();
+                };
+                Children.Add(fill);
+                Note("Width and height resize this background picture or video. X and Y move it. Fill the scene covers the whole scene again. In Play it stays behind your buttons.");
+            }
             var start = new CheckBox { Content = "Start scene", IsChecked = session.Document.StartSceneId == scene.Id };
             start.IsCheckedChanged += (_, _) =>
             {
@@ -278,6 +316,23 @@ public sealed class InspectorPanel : StackPanel
 
         void PlayEntrance() =>
             PreviewEntrance?.Invoke(element.Id, element.Entrance, element.EntranceDelayMs, EntranceEffects.DurationMs(element));
+    }
+
+    private static bool HasBackgroundMedia(Scene scene) =>
+        !string.IsNullOrWhiteSpace(scene.BackgroundImage) || !string.IsNullOrWhiteSpace(scene.BackgroundVideo);
+
+    private static void RememberBackgroundSize(Scene scene, EditorSession session)
+    {
+        if (!scene.BackgroundFill && scene.BackgroundWidth >= 8 && scene.BackgroundHeight >= 8)
+        {
+            scene.BackgroundFill = false;
+            return;
+        }
+        if (scene.BackgroundWidth < 8)
+            scene.BackgroundWidth = session.Document.Width;
+        if (scene.BackgroundHeight < 8)
+            scene.BackgroundHeight = session.Document.Height;
+        scene.BackgroundFill = false;
     }
 
     private void BuildInteractions()
