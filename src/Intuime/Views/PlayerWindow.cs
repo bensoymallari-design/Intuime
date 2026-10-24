@@ -29,6 +29,15 @@ public sealed class PlayerWindow : Window
     private readonly TextBlock _hint;
     private readonly TextBlock _status;
     private readonly KioskWebPage _page = new();
+    private string _openPageUrl = "";
+    private readonly SceneSurface _pageButtons = new();
+    private readonly LayoutTransformControl _pageButtonsHost = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        IsVisible = false
+    };
+    private readonly Window? _buttonsWindow;
     private readonly DispatcherTimer _timer;
     private readonly Dictionary<string, Host> _hosts = new();
     private double _fade;
@@ -55,6 +64,11 @@ public sealed class PlayerWindow : Window
 
         _surface.UsePlayback(_engine, assetRoot);
         _surface.OpenUrlRequested += OpenUrl;
+        _pageButtons.UsePlayback(_engine, assetRoot);
+        _pageButtons.PassClicksThrough();
+        _pageButtons.OpenUrlRequested += OpenUrl;
+        _pageButtonsHost.LayoutTransform = _scale;
+        _pageButtonsHost.Child = _pageButtons;
         _scaler.LayoutTransform = _scale;
         _scaler.Child = _surface;
         _hint = new TextBlock
@@ -78,16 +92,47 @@ public sealed class PlayerWindow : Window
             IsVisible = false
         };
         _page.Failed += ShowStatus;
-        Content = new Grid
+        if (OperatingSystem.IsLinux())
         {
-            Children = { _scaler, _overlay, _page, _hint, _status }
-        };
+            _pageButtonsHost.HorizontalAlignment = HorizontalAlignment.Left;
+            _pageButtonsHost.VerticalAlignment = VerticalAlignment.Top;
+            _buttonsWindow = new Window
+            {
+                Title = "Intuime",
+                SystemDecorations = SystemDecorations.None,
+                ExtendClientAreaToDecorationsHint = true,
+                ExtendClientAreaChromeHints = ExtendClientAreaChromeHints.NoChrome,
+                TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+                Background = Brushes.Transparent,
+                ShowInTaskbar = false,
+                CanResize = false,
+                ShowActivated = false,
+                Topmost = true,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                SizeToContent = SizeToContent.Manual,
+                Content = _pageButtonsHost
+            };
+        }
+        else
+            _buttonsWindow = null;
+        var layers = new Grid();
+        layers.Children.Add(_scaler);
+        layers.Children.Add(_overlay);
+        layers.Children.Add(_page);
+        if (_buttonsWindow == null)
+            layers.Children.Add(_pageButtonsHost);
+        layers.Children.Add(_hint);
+        layers.Children.Add(_status);
+        Content = layers;
 
         _engine.SceneChanged += () =>
         {
             _fade = 0;
             _status.IsVisible = false;
             _page.HidePage();
+            _pageButtonsHost.IsVisible = false;
+            if (_buttonsWindow?.IsVisible == true)
+                _buttonsWindow.Hide();
             DisposeHosts();
             _surface.SetOmit(null);
             _surface.Rebuild();
@@ -97,6 +142,8 @@ public sealed class PlayerWindow : Window
         _engine.Changed += () =>
         {
             _surface.Sync();
+            if (_pageButtonsHost.IsVisible)
+                _pageButtons.Sync();
             LayoutVideos();
         };
         _engine.MediaCommand += ApplyMedia;
@@ -135,6 +182,8 @@ public sealed class PlayerWindow : Window
         Closed += (_, _) =>
         {
             _timer.Stop();
+            if (_buttonsWindow != null)
+                _buttonsWindow.Close();
             DisposeHosts();
         };
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
@@ -380,6 +429,8 @@ public sealed class PlayerWindow : Window
         if (!_page.IsVisible)
         {
             LinuxWebFrame.Hide();
+            if (_buttonsWindow?.IsVisible == true)
+                _buttonsWindow.Hide();
             return;
         }
 
@@ -389,7 +440,56 @@ public sealed class PlayerWindow : Window
         var originX = Math.Max(0, (Bounds.Width - width) / 2);
         var originY = Math.Max(0, (Bounds.Height - height) / 2);
         _page.Fit(width, height);
-        LinuxWebFrame.Show(handle, (int)originX, (int)originY, (int)width, (int)height);
+        if (_pageButtonsHost.IsVisible)
+            _pageButtons.MoveOverlay(0, 0, _engine.Live.Width, _engine.Live.Height);
+        var buttons = _buttonsWindow?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (!_page.DrawsInTheWindow)
+            LinuxWebFrame.Show(handle, (int)originX, (int)originY, (int)width, (int)height, buttons);
+        PlacePageButtons(originX, originY, width, height);
+    }
+
+    private void PlacePageButtons(double originX, double originY, double width, double height)
+    {
+        if (_buttonsWindow == null || !_page.IsVisible)
+            return;
+        var shapes = PageShapes();
+        if (shapes.Count == 0)
+        {
+            if (_buttonsWindow.IsVisible)
+                _buttonsWindow.Hide();
+            return;
+        }
+
+        _buttonsWindow.Position = this.PointToScreen(new Point(originX, originY));
+        _buttonsWindow.Width = width;
+        _buttonsWindow.Height = height;
+        _buttonsWindow.Background = Brushes.Transparent;
+        if (!_buttonsWindow.IsVisible)
+            _buttonsWindow.Show(this);
+        var xid = _buttonsWindow.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (xid == IntPtr.Zero)
+            return;
+        LinuxWebFrame.ShapeTo(xid, shapes);
+    }
+
+    private List<(int X, int Y, int Width, int Height)> PageShapes()
+    {
+        var shapes = new List<(int X, int Y, int Width, int Height)>();
+        var scene = _engine.Current;
+        if (scene == null)
+            return shapes;
+        var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
+        foreach (var element in scene.Elements)
+        {
+            if (!element.IsVisible || !ElementFactory.CapturesPointer(element) || IsOpenWebLink(element, _openPageUrl))
+                continue;
+            var x = (int)Math.Round(element.X * scale);
+            var y = (int)Math.Round(element.Y * scale);
+            var width = (int)Math.Round(element.Width * scale);
+            var height = (int)Math.Round(element.Height * scale);
+            shapes.Add((Math.Max(0, x), Math.Max(0, y), Math.Max(1, width), Math.Max(1, height)));
+        }
+        return shapes;
     }
 
     private Border BuildPlayBar(Host host)
@@ -675,7 +775,28 @@ public sealed class PlayerWindow : Window
 
         _status.IsVisible = false;
         _hint.IsVisible = false;
+        _openPageUrl = url;
+        ShowPageButtons(url);
         LayoutPage();
+    }
+
+    private void ShowPageButtons(string url)
+    {
+        var width = Math.Max(1, _engine.Live.Width);
+        var height = Math.Max(1, _engine.Live.Height);
+        _pageButtons.UseOverlay(0, 0, width, height, element => !IsOpenWebLink(element, url));
+        _pageButtons.PassClicksThrough();
+        _pageButtons.Rebuild();
+        _pageButtonsHost.IsVisible = true;
+    }
+
+    private static bool IsOpenWebLink(SceneElement element, string url)
+    {
+        if (element.Kind != ElementKind.WebLink)
+            return false;
+        return WebAddresses.TryNormalize(element.Url, out var link) &&
+               WebAddresses.TryNormalize(url, out var open) &&
+               string.Equals(link, open, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnKey(object? sender, KeyEventArgs e)

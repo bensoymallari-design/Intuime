@@ -178,7 +178,7 @@ public sealed class InspectorPanel : StackPanel
         if (element.Kind == ElementKind.WebLink)
         {
             Text("URL", element.Url, value => element.Url = value);
-            Note("In Play, this page stays inside Intuime and fills the scene, the same way the rest of the kiosk fits the screen. There is no address bar, and no close, minimize, or maximize buttons.");
+            Note("In Play, this page stays inside Intuime and fills the scene behind your other buttons. A Back button, or any other button, still opens the scene you chose. There is no close, minimize, or maximize button.");
         }
         if (element.Kind == ElementKind.Clock)
             Text("Format", element.ClockFormat, value => element.ClockFormat = value);
@@ -389,7 +389,7 @@ public sealed class InspectorPanel : StackPanel
             panel.Children.Add(TextControl("URL", action.Text, value => action.Text = value));
             panel.Children.Add(new TextBlock
             {
-                Text = "This opens inside the kiosk and fills the scene. It does not open a browser window, and it has no close or minimize buttons.",
+                Text = "This opens inside the kiosk and fills the scene behind your other buttons. Those buttons can still open another scene. There is no close or minimize button.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Painting.Brush(Painting.Muted),
                 FontSize = 12

@@ -11,6 +11,8 @@ public sealed class KioskWebPage : Grid
 
     public event Action<string>? Failed;
 
+    public bool DrawsInTheWindow { get; } = OperatingSystem.IsWindows();
+
     public KioskWebPage()
     {
         IsVisible = false;
@@ -102,6 +104,8 @@ public sealed class KioskWebPage : Grid
                 wpe.PreferWebKitGtkInstead = true;
             if (args is GtkWebViewEnvironmentRequestedEventArgs gtk)
                 gtk.ExperimentalOffscreen = false;
+            if (args is WindowsWebView2EnvironmentRequestedEventArgs windows)
+                windows.ExperimentalOffscreen = true;
         };
         view.NavigationStarted += (_, args) =>
         {
