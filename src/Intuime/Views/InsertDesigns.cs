@@ -1,5 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -111,13 +113,14 @@ public static class InsertDesigns
     private sealed class Hover
     {
         private static Hover? _open;
-        private readonly Flyout _flyout;
-        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(260) };
+        private readonly Popup _popup;
+        private readonly ScrollViewer _scroller;
+        private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(280) };
+        private Control? _anchor;
+        private object? _tip;
 
         public Hover(ElementKind kind, Action<ElementPreset> insert)
         {
-            var flyout = new Flyout();
-            _flyout = flyout;
             var list = new StackPanel { Spacing = 2 };
             foreach (var preset in ElementPresets.For(kind))
             {
@@ -136,13 +139,19 @@ public static class InsertDesigns
                 button.Click += (_, _) =>
                 {
                     _timer.Stop();
-                    flyout.Hide();
-                    if (_open == this)
-                        _open = null;
+                    Close();
                     insert(captured);
                 };
                 list.Children.Add(button);
             }
+
+            _scroller = new ScrollViewer
+            {
+                Content = list,
+                MaxHeight = 480,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
             var host = new Border
             {
                 Background = Painting.Brush("#121820"),
@@ -151,20 +160,22 @@ public static class InsertDesigns
                 CornerRadius = new CornerRadius(10),
                 Padding = new Thickness(6),
                 MinWidth = 220,
-                Child = list
+                Child = _scroller
             };
             host.PointerEntered += (_, _) => _timer.Stop();
             host.PointerExited += (_, _) => _timer.Start();
-            flyout.Content = host;
-            flyout.Placement = PlacementMode.RightEdgeAlignedTop;
-            flyout.ShowMode = FlyoutShowMode.Standard;
-            _timer.Tick += (_, _) =>
+            _popup = new Popup
             {
-                _timer.Stop();
-                _flyout.Hide();
-                if (_open == this)
-                    _open = null;
+                Child = host,
+                Placement = PlacementMode.AnchorAndGravity,
+                PlacementAnchor = PopupAnchor.TopLeft,
+                PlacementGravity = PopupGravity.BottomRight,
+                PlacementConstraintAdjustment = PopupPositionerConstraintAdjustment.SlideY,
+                ShouldUseOverlayLayer = false,
+                IsLightDismissEnabled = false,
+                HorizontalOffset = -4
             };
+            _timer.Tick += (_, _) => Close();
         }
 
         public void Show(Control anchor)
@@ -173,16 +184,50 @@ public static class InsertDesigns
                 _open.Hide();
             _open = this;
             _timer.Stop();
-            if (!_flyout.IsOpen)
-                _flyout.ShowAt(anchor);
+            if (_anchor != anchor)
+            {
+                RestoreTip();
+                _anchor = anchor;
+                _tip = ToolTip.GetTip(anchor);
+                ToolTip.SetTip(anchor, null);
+            }
+            var window = TopLevel.GetTopLevel(anchor);
+            if (window == null)
+                return;
+            var corner = anchor.TranslatePoint(new Point(anchor.Bounds.Width, 0), window);
+            if (corner == null)
+                return;
+            _scroller.MaxHeight = Math.Min(440, Math.Max(220, window.Bounds.Height - 120));
+            _popup.PlacementTarget = window;
+            _popup.PlacementRect = new Rect(corner.Value.X, corner.Value.Y, 1, 1);
+            if (!_popup.IsOpen)
+                _popup.Open();
         }
 
         public void ScheduleClose() => _timer.Start();
 
+        private void Close()
+        {
+            _timer.Stop();
+            _popup.IsOpen = false;
+            RestoreTip();
+            _anchor = null;
+            if (_open == this)
+                _open = null;
+        }
+
         private void Hide()
         {
             _timer.Stop();
-            _flyout.Hide();
+            _popup.IsOpen = false;
+            RestoreTip();
+            _anchor = null;
+        }
+
+        private void RestoreTip()
+        {
+            if (_anchor != null)
+                ToolTip.SetTip(_anchor, _tip);
         }
     }
 }
