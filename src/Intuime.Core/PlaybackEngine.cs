@@ -250,6 +250,7 @@ public sealed class PlaybackEngine
         live.BackgroundY = copy.BackgroundY;
         live.BackgroundWidth = copy.BackgroundWidth;
         live.BackgroundHeight = copy.BackgroundHeight;
+        live.Backgrounds = copy.Backgrounds;
         live.Elements = copy.Elements;
         live.Interactions = copy.Interactions;
     }

@@ -222,15 +222,26 @@ public sealed class PlayerWindow : Window
         var scene = _engine.Current;
         if (vlc == null || scene == null)
         {
+            scene?.PullLegacyBackground();
             var wantsMedia = scene?.Elements.Any(element => element.Kind is ElementKind.Video or ElementKind.Audio) == true
-                || !string.IsNullOrWhiteSpace(scene?.BackgroundVideo);
+                || scene?.Backgrounds.Any(layer => layer.Video && !string.IsNullOrWhiteSpace(layer.Source)) == true;
             if (!MediaRuntime.IsAvailable && wantsMedia)
                 ShowStatus(MediaRuntime.Status);
             return;
         }
 
-        if (!string.IsNullOrWhiteSpace(scene.BackgroundVideo))
-            CreateBackdrop(vlc, scene);
+        scene.PullLegacyBackground();
+        var videos = scene.Backgrounds
+            .Select((layer, index) => (layer, index))
+            .Where(item => item.layer.Video && !string.IsNullOrWhiteSpace(item.layer.Source))
+            .ToList();
+        foreach (var (layer, index) in videos)
+            CreateBackdrop(vlc, scene, layer, index);
+        if (videos.Count > 0)
+        {
+            _surface.SetOmit(CoveredByBackdrop);
+            _surface.Rebuild();
+        }
 
         foreach (var element in scene.Elements.Where(element => element.Kind is ElementKind.Video or ElementKind.Audio))
         {
@@ -280,34 +291,37 @@ public sealed class PlayerWindow : Window
         }
     }
 
-    private const string BackdropId = "__background";
+    private const string BackdropPrefix = "bg:";
 
-    private void CreateBackdrop(LibVLC vlc, Scene scene)
+    private void CreateBackdrop(LibVLC vlc, Scene scene, BackgroundLayer layer, int index)
     {
-        var path = ProjectStore.Resolve(_assetRoot, scene.BackgroundVideo);
+        var path = ProjectStore.Resolve(_assetRoot, layer.Source);
         if (!File.Exists(path))
         {
-            ShowStatus("Missing background video: " + scene.BackgroundVideo);
+            ShowStatus("Missing background video: " + layer.Source);
             return;
         }
 
         try
         {
-            var box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
+            var box = layer.Box(_engine.Live.Width, _engine.Live.Height);
             var player = new MediaPlayer(vlc)
             {
                 EnableKeyInput = false,
                 EnableMouseInput = false,
-                Mute = !scene.BackgroundVideoSound,
-                Volume = scene.BackgroundVideoSound ? 80 : 0,
+                Mute = !layer.Sound,
+                Volume = layer.Sound ? 80 : 0,
                 AspectRatio = Math.Max(1, (int)Math.Round(box.Width)) + ":" + Math.Max(1, (int)Math.Round(box.Height)),
                 Scale = 0
             };
-            var host = new Host(player, scene.BackgroundVideoLoop) { Path = path };
+            var host = new Host(player, layer.Loop) { Path = path, LayerId = layer.Id };
             player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
             host.Foreground = new SceneSurface();
             host.Foreground.UsePlayback(_engine, _assetRoot);
-            host.Foreground.UseOverlay(box.X, box.Y, box.Width, box.Height, BackdropIntersects, null);
+            host.Foreground.UseOverlay(box.X, box.Y, box.Width, box.Height,
+                candidate => ElementOverVideo(candidate, box),
+                null,
+                picture => PictureOverVideo(scene, picture, index, box));
             host.Foreground.Rebuild();
             host.ForegroundScale = new ScaleTransform(Math.Max(0.01, _scale.ScaleX), Math.Max(0.01, _scale.ScaleY));
             var foregroundHost = new LayoutTransformControl
@@ -320,9 +334,7 @@ public sealed class PlayerWindow : Window
             var view = new VideoView { MediaPlayer = player, Content = foregroundHost, ZIndex = 0 };
             host.View = view;
             _overlay.Children.Add(view);
-            _hosts[BackdropId] = host;
-            _surface.SetOmit(BackdropCovers);
-            _surface.Rebuild();
+            _hosts[BackdropPrefix + layer.Id] = host;
             LaunchWhenReady(host, view);
         }
         catch (Exception ex)
@@ -331,9 +343,16 @@ public sealed class PlayerWindow : Window
         }
     }
 
-    private bool BackdropIntersects(SceneElement candidate)
+    private bool PictureOverVideo(Scene scene, BackgroundLayer picture, int videoIndex, (double X, double Y, double Width, double Height) box)
     {
-        if (!BackdropCandidate(candidate, out var box))
+        var index = scene.Backgrounds.FindIndex(layer => layer.Id == picture.Id);
+        return index > videoIndex && !picture.Video
+            && picture.Hits(box.X, box.Y, box.Width, box.Height, _engine.Live.Width, _engine.Live.Height);
+    }
+
+    private bool ElementOverVideo(SceneElement candidate, (double X, double Y, double Width, double Height) box)
+    {
+        if (!candidate.IsVisible || candidate.Kind == ElementKind.Video || OverlayOwner(candidate) != null)
             return false;
         return candidate.X < box.X + box.Width &&
                candidate.X + candidate.Width > box.X &&
@@ -341,25 +360,19 @@ public sealed class PlayerWindow : Window
                candidate.Y + candidate.Height > box.Y;
     }
 
-    private bool BackdropCovers(SceneElement candidate)
+    private bool CoveredByBackdrop(SceneElement candidate)
     {
-        if (!BackdropCandidate(candidate, out var box))
-            return false;
-        return candidate.X >= box.X &&
-               candidate.Y >= box.Y &&
-               candidate.X + candidate.Width <= box.X + box.Width &&
-               candidate.Y + candidate.Height <= box.Y + box.Height;
-    }
-
-    private bool BackdropCandidate(SceneElement candidate, out (double X, double Y, double Width, double Height) box)
-    {
-        box = default;
         var scene = _engine.Current;
         if (scene == null || !candidate.IsVisible || candidate.Kind == ElementKind.Video || OverlayOwner(candidate) != null)
             return false;
-        box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
-        return true;
+        return scene.Backgrounds.Any(layer => layer.Video && layer.Source.Length > 0 && FullyInside(candidate, layer.Box(_engine.Live.Width, _engine.Live.Height)));
     }
+
+    private static bool FullyInside(SceneElement candidate, (double X, double Y, double Width, double Height) box) =>
+        candidate.X >= box.X &&
+        candidate.Y >= box.Y &&
+        candidate.X + candidate.Width <= box.X + box.Width &&
+        candidate.Y + candidate.Height <= box.Y + box.Height;
 
     private void ApplyMedia(MediaRequest request)
     {
@@ -408,9 +421,11 @@ public sealed class PlayerWindow : Window
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
         var originX = Math.Max(0, (Bounds.Width - _engine.Live.Width * scale) / 2);
         var originY = Math.Max(0, (Bounds.Height - _engine.Live.Height * scale) / 2);
-        if (_hosts.TryGetValue(BackdropId, out var backdrop) && backdrop.View != null)
+        foreach (var layer in scene.Backgrounds.Where(layer => layer.Video))
         {
-            var box = scene.BackgroundBox(_engine.Live.Width, _engine.Live.Height);
+            if (!_hosts.TryGetValue(BackdropPrefix + layer.Id, out var backdrop) || backdrop.View == null)
+                continue;
+            var box = layer.Box(_engine.Live.Width, _engine.Live.Height);
             Canvas.SetLeft(backdrop.View, originX + box.X * scale);
             Canvas.SetTop(backdrop.View, originY + box.Y * scale);
             backdrop.View.Width = Math.Max(1, box.Width * scale);
@@ -882,6 +897,7 @@ public sealed class PlayerWindow : Window
         public ScaleTransform? ForegroundScale { get; set; }
         public Border? Bar { get; set; }
         public string ElementId { get; set; } = "";
+        public string LayerId { get; set; } = "";
         public string Path { get; set; } = "";
         public bool Loop { get; set; }
         public bool Scrubbing { get; set; }

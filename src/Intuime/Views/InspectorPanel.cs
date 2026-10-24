@@ -75,73 +75,7 @@ public sealed class InspectorPanel : StackPanel
                 scene.Background = value;
                 session.TouchLive();
             });
-            Text("Background image", scene.BackgroundImage, value =>
-            {
-                scene.BackgroundImage = value;
-                session.TouchLive();
-            });
-            Browse("Choose image", async () =>
-            {
-                var path = await _browse("image");
-                if (path == null)
-                    return;
-                scene.BackgroundImage = path;
-                session.Commit();
-            });
-            Text("Background video", scene.BackgroundVideo, value =>
-            {
-                scene.BackgroundVideo = value;
-                session.TouchLive();
-            });
-            Browse("Choose video", async () =>
-            {
-                var path = await _browse("video");
-                if (path == null)
-                    return;
-                scene.BackgroundVideo = path;
-                session.Commit();
-            });
-            Check("Loop the video", scene.BackgroundVideoLoop, value => scene.BackgroundVideoLoop = value);
-            Check("Play the video sound", scene.BackgroundVideoSound, value => scene.BackgroundVideoSound = value);
-            if (HasBackgroundMedia(scene))
-            {
-                var box = scene.BackgroundBox(session.Document.Width, session.Document.Height);
-                Number("X", box.X, value =>
-                {
-                    RememberBackgroundSize(scene, session);
-                    scene.BackgroundX = value;
-                });
-                Number("Y", box.Y, value =>
-                {
-                    RememberBackgroundSize(scene, session);
-                    scene.BackgroundY = value;
-                });
-                Number("Width", box.Width, value =>
-                {
-                    RememberBackgroundSize(scene, session);
-                    scene.BackgroundWidth = Math.Max(8, value);
-                });
-                Number("Height", box.Height, value =>
-                {
-                    RememberBackgroundSize(scene, session);
-                    scene.BackgroundHeight = Math.Max(8, value);
-                });
-                var fill = new Button { Content = "Fill the scene", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
-                fill.Click += (_, _) =>
-                {
-                    if (_building)
-                        return;
-                    scene.BackgroundFill = true;
-                    scene.BackgroundX = 0;
-                    scene.BackgroundY = 0;
-                    scene.BackgroundWidth = 0;
-                    scene.BackgroundHeight = 0;
-                    session.Commit();
-                    Refresh();
-                };
-                Children.Add(fill);
-                Note("Width and height resize this background picture or video. X and Y move it. Fill the scene covers the whole scene again. In Play it stays behind your buttons.");
-            }
+            BuildBackgroundLayers(scene, session);
             var start = new CheckBox { Content = "Start scene", IsChecked = session.Document.StartSceneId == scene.Id };
             start.IsCheckedChanged += (_, _) =>
             {
@@ -318,21 +252,196 @@ public sealed class InspectorPanel : StackPanel
             PreviewEntrance?.Invoke(element.Id, element.Entrance, element.EntranceDelayMs, EntranceEffects.DurationMs(element));
     }
 
-    private static bool HasBackgroundMedia(Scene scene) =>
-        !string.IsNullOrWhiteSpace(scene.BackgroundImage) || !string.IsNullOrWhiteSpace(scene.BackgroundVideo);
-
-    private static void RememberBackgroundSize(Scene scene, EditorSession session)
+    private void BuildBackgroundLayers(Scene scene, EditorSession session)
     {
-        if (!scene.BackgroundFill && scene.BackgroundWidth >= 8 && scene.BackgroundHeight >= 8)
+        scene.PullLegacyBackground();
+        Heading("Backgrounds");
+        Note("Add more than one picture or video. They stack. Layer 1 is the back. Behind and In front swap that layer with its neighbor. A PNG with an empty background shows the layer behind it. Your buttons stay in front of all of these.");
+        var addRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var addPicture = new Button { Content = "Add picture", Classes = { "tool" } };
+        addPicture.Click += async (_, _) =>
         {
-            scene.BackgroundFill = false;
-            return;
+            if (_building)
+                return;
+            var path = await _browse("image");
+            if (path == null)
+                return;
+            BackgroundLayers.Add(scene, video: false, path);
+            session.Commit();
+            Refresh();
+        };
+        var addVideo = new Button { Content = "Add video", Classes = { "tool" } };
+        addVideo.Click += async (_, _) =>
+        {
+            if (_building)
+                return;
+            var path = await _browse("video");
+            if (path == null)
+                return;
+            BackgroundLayers.Add(scene, video: true, path);
+            session.Commit();
+            Refresh();
+        };
+        addRow.Children.Add(addPicture);
+        addRow.Children.Add(addVideo);
+        Children.Add(addRow);
+
+        for (var index = 0; index < scene.Backgrounds.Count; index++)
+        {
+            var layer = scene.Backgrounds[index];
+            var position = index;
+            var card = new StackPanel { Spacing = 8 };
+            var file = string.IsNullOrWhiteSpace(layer.Source) ? "No file yet" : System.IO.Path.GetFileName(layer.Source);
+            card.Children.Add(new TextBlock
+            {
+                Text = "Layer " + (position + 1) + "  ·  " + (layer.Video ? "Video" : "Picture") + "  ·  " + file,
+                Foreground = Painting.Brush("#E7EEF6"),
+                FontWeight = FontWeight.SemiBold,
+                TextWrapping = TextWrapping.Wrap
+            });
+            var row = new WrapPanel { Orientation = Orientation.Horizontal };
+            LayerButton(row, "Behind", () => BackgroundLayers.Move(scene, layer.Id, -1));
+            LayerButton(row, "In front", () => BackgroundLayers.Move(scene, layer.Id, 1));
+            LayerButton(row, "Remove", () => BackgroundLayers.Remove(scene, layer.Id));
+            card.Children.Add(row);
+            card.Children.Add(LayerText("File", layer.Source, value => layer.Source = value));
+            var replace = new Button { Content = layer.Video ? "Choose video" : "Choose image", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
+            replace.Click += async (_, _) =>
+            {
+                if (_building)
+                    return;
+                var path = await _browse(layer.Video ? "video" : "image");
+                if (path == null)
+                    return;
+                layer.Source = path;
+                session.Commit();
+                Refresh();
+            };
+            card.Children.Add(replace);
+            if (layer.Video)
+            {
+                card.Children.Add(LayerCheck("Loop the video", layer.Loop, value => layer.Loop = value));
+                card.Children.Add(LayerCheck("Play the video sound", layer.Sound, value => layer.Sound = value));
+            }
+            var box = layer.Box(session.Document.Width, session.Document.Height);
+            card.Children.Add(LayerNumber("X", box.X, value =>
+            {
+                RememberLayerSize(layer, session);
+                layer.X = value;
+            }));
+            card.Children.Add(LayerNumber("Y", box.Y, value =>
+            {
+                RememberLayerSize(layer, session);
+                layer.Y = value;
+            }));
+            card.Children.Add(LayerNumber("Width", box.Width, value =>
+            {
+                RememberLayerSize(layer, session);
+                layer.Width = Math.Max(8, value);
+            }));
+            card.Children.Add(LayerNumber("Height", box.Height, value =>
+            {
+                RememberLayerSize(layer, session);
+                layer.Height = Math.Max(8, value);
+            }));
+            var fill = new Button { Content = "Fill the scene", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
+            fill.Click += (_, _) =>
+            {
+                if (_building)
+                    return;
+                layer.Fill = true;
+                layer.X = 0;
+                layer.Y = 0;
+                layer.Width = 0;
+                layer.Height = 0;
+                session.Commit();
+                Refresh();
+            };
+            card.Children.Add(fill);
+            Children.Add(new Border
+            {
+                BorderBrush = Painting.Brush("#2A3544"),
+                BorderThickness = new Avalonia.Thickness(1),
+                CornerRadius = new Avalonia.CornerRadius(8),
+                Padding = new Avalonia.Thickness(8),
+                Child = card
+            });
         }
-        if (scene.BackgroundWidth < 8)
-            scene.BackgroundWidth = session.Document.Width;
-        if (scene.BackgroundHeight < 8)
-            scene.BackgroundHeight = session.Document.Height;
-        scene.BackgroundFill = false;
+    }
+
+    private void LayerButton(Panel row, string label, Action action)
+    {
+        var button = new Button { Content = label, Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
+        button.Click += (_, _) =>
+        {
+            if (_building)
+                return;
+            action();
+            _session?.Commit();
+            Refresh();
+        };
+        row.Children.Add(button);
+    }
+
+    private Control LayerText(string label, string value, Action<string> apply)
+    {
+        var panel = new StackPanel { Spacing = 4 };
+        panel.Children.Add(new TextBlock { Text = label, Foreground = Painting.Brush(Painting.Muted), FontSize = 12 });
+        var box = new TextBox { Text = value };
+        box.TextChanged += (_, _) =>
+        {
+            if (_building)
+                return;
+            apply(box.Text ?? "");
+            _session?.TouchLive();
+        };
+        box.LostFocus += (_, _) => _session?.Commit();
+        panel.Children.Add(box);
+        return panel;
+    }
+
+    private Control LayerNumber(string label, double value, Action<double> apply)
+    {
+        var panel = new StackPanel { Spacing = 4 };
+        panel.Children.Add(new TextBlock { Text = label, Foreground = Painting.Brush(Painting.Muted), FontSize = 12 });
+        var box = new TextBox { Text = value.ToString("0.##", CultureInfo.InvariantCulture) };
+        box.TextChanged += (_, _) =>
+        {
+            if (_building)
+                return;
+            if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed))
+            {
+                apply(parsed);
+                _session?.TouchLive();
+            }
+        };
+        box.LostFocus += (_, _) => _session?.Commit();
+        panel.Children.Add(box);
+        return panel;
+    }
+
+    private Control LayerCheck(string label, bool value, Action<bool> apply)
+    {
+        var box = new CheckBox { Content = label, IsChecked = value };
+        box.IsCheckedChanged += (_, _) =>
+        {
+            if (_building)
+                return;
+            apply(box.IsChecked == true);
+            _session?.Commit();
+        };
+        return box;
+    }
+
+    private static void RememberLayerSize(BackgroundLayer layer, EditorSession session)
+    {
+        if (!layer.Fill && layer.Width >= 8 && layer.Height >= 8)
+            return;
+        if (layer.Width < 8)
+            layer.Width = session.Document.Width;
+        if (layer.Height < 8)
+            layer.Height = session.Document.Height;
+        layer.Fill = false;
     }
 
     private void BuildInteractions()
