@@ -483,8 +483,10 @@ public sealed class PlayerWindow : Window
         {
             if (!element.IsVisible || !ElementFactory.CapturesPointer(element) || IsOpenWebLink(element, _openPageUrl))
                 continue;
-            var x = (int)Math.Round(element.X * scale);
-            var y = (int)Math.Round(element.Y * scale);
+            if (element.Opacity * element.EffectOpacity <= 0.04)
+                continue;
+            var x = (int)Math.Round((element.X + element.EffectShiftX) * scale);
+            var y = (int)Math.Round((element.Y + element.EffectShiftY) * scale);
             var width = (int)Math.Round(element.Width * scale);
             var height = (int)Math.Round(element.Height * scale);
             shapes.Add((Math.Max(0, x), Math.Max(0, y), Math.Max(1, width), Math.Max(1, height)));

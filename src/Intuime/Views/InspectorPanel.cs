@@ -26,6 +26,7 @@ public sealed class InspectorPanel : StackPanel
     public Control? PinnedEffect { get; private set; }
     public event Action? PinnedEffectChanged;
     public event Action<string, string>? PreviewEffect;
+    public event Action<string, string, int, int>? PreviewEntrance;
 
     public void Show(EditorSession session, string tab)
     {
@@ -242,7 +243,41 @@ public sealed class InspectorPanel : StackPanel
             Foreground = Painting.Brush(Painting.Muted),
             FontSize = 12
         });
+        var entranceNames = new[] { "None" }.Concat(EntranceEffects.All).ToArray();
+        var currentEntrance = EntranceEffects.All.FirstOrDefault(name =>
+            string.Equals(name, element.Entrance, StringComparison.OrdinalIgnoreCase)) ?? "None";
+        panel.Children.Add(ChoiceControl("When the scene opens", entranceNames, currentEntrance, value => value, value =>
+        {
+            element.Entrance = value == "None" ? "" : value;
+            if (element.EntranceMs <= 0)
+                element.EntranceMs = EntranceEffects.DefaultDurationMs;
+            _session?.Commit();
+            PlayEntrance();
+        }));
+        if (EntranceEffects.Known(element.Entrance))
+        {
+            panel.Children.Add(NumberControl("Starts after (seconds)", element.EntranceDelayMs / 1000.0, value =>
+            {
+                element.EntranceDelayMs = (int)Math.Round(Math.Clamp(value, 0, 30) * 1000);
+                PlayEntrance();
+            }));
+            panel.Children.Add(NumberControl("How long (seconds)", EntranceEffects.DurationMs(element) / 1000.0, value =>
+            {
+                element.EntranceMs = (int)Math.Round(Math.Clamp(value <= 0 ? 0.7 : value, 0.15, 8) * 1000);
+                PlayEntrance();
+            }));
+        }
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Plays when this scene opens. Starts after is the wait. Fade in begins hidden, then appears. Slide, rotate, bounce, pop, grow, and flip each arrive in their own way.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Painting.Brush(Painting.Muted),
+            FontSize = 12
+        });
         return panel;
+
+        void PlayEntrance() =>
+            PreviewEntrance?.Invoke(element.Id, element.Entrance, element.EntranceDelayMs, EntranceEffects.DurationMs(element));
     }
 
     private void BuildInteractions()

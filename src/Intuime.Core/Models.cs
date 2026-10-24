@@ -135,6 +135,9 @@ public sealed class SceneElement
     public bool HasShadow { get; set; }
     public string TapEffect { get; set; } = "";
     public double TapStrength { get; set; } = 1;
+    public string Entrance { get; set; } = "";
+    public int EntranceDelayMs { get; set; }
+    public int EntranceMs { get; set; } = EntranceEffects.DefaultDurationMs;
     public List<Interaction> Interactions { get; set; } = new();
 
     [JsonIgnore]

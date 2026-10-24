@@ -630,4 +630,101 @@ public class ExperienceTests
         engine.Tick();
         Assert.Equal("next", engine.Current.Id);
     }
+
+    [Fact]
+    public void Entrance_waits_then_arrives_and_plays_again_next_visit()
+    {
+        var posed = new SceneElement();
+        EntranceEffects.Apply(posed, "Bounce", 0);
+        Assert.True(posed.EffectShiftY < -200);
+        EntranceEffects.Apply(posed, "Rotate", 0);
+        Assert.True(posed.EffectRotation < -100);
+        EntranceEffects.Apply(posed, "Fade in", 1);
+        Assert.Equal(1, posed.EffectOpacity);
+        Assert.Equal(0, posed.EffectShiftY);
+
+        var title = ElementFactory.Create(ElementKind.Text, 40, 50, 0, 1);
+        title.Id = "title";
+        title.Entrance = "Fade in";
+        title.EntranceDelayMs = 400;
+        title.EntranceMs = 500;
+        var button = ElementFactory.Create(ElementKind.Button, 40, 200, 0, 2);
+        button.Id = "go";
+        button.Entrance = "Slide from left";
+        button.EntranceDelayMs = 0;
+        button.EntranceMs = 400;
+        button.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "other" } }
+        });
+        var back = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        back.Id = "back";
+        back.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "only" } }
+        });
+        var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(new ExperienceDocument
+        {
+            StartSceneId = "only",
+            Scenes =
+            {
+                new Scene { Id = "only", Elements = { title, button } },
+                new Scene { Id = "other", Elements = { back } }
+            }
+        }, () => now);
+        var saved = ProjectStore.Clone(engine.Original).Scenes[0].Elements.Single(e => e.Id == "title");
+        Assert.Equal("Fade in", saved.Entrance);
+        Assert.Equal(400, saved.EntranceDelayMs);
+        Assert.Equal(500, saved.EntranceMs);
+
+        engine.Start();
+        var liveTitle = engine.Current!.Elements.Single(e => e.Id == "title");
+        var liveButton = engine.Current.Elements.Single(e => e.Id == "go");
+        Assert.Equal(0, liveTitle.EffectOpacity);
+        Assert.True(liveButton.EffectShiftX < -400);
+
+        now = now.AddMilliseconds(200);
+        engine.Tick();
+        liveButton = engine.Current.Elements.Single(e => e.Id == "go");
+        Assert.Equal(0, liveTitle.EffectOpacity);
+        Assert.True(liveButton.EffectShiftX < 0);
+        Assert.True(liveButton.EffectShiftX > -300);
+        Assert.True(liveButton.EffectOpacity > 0.5);
+
+        now = now.AddMilliseconds(200);
+        engine.Tick();
+        liveButton = engine.Current.Elements.Single(e => e.Id == "go");
+        Assert.Equal(0, liveButton.EffectShiftX);
+        Assert.Equal(1, liveButton.EffectOpacity);
+        Assert.True(liveTitle.EffectOpacity < 0.05);
+
+        now = now.AddMilliseconds(500);
+        engine.Tick();
+        Assert.Equal(1, engine.Current.Elements.Single(e => e.Id == "title").EffectOpacity);
+
+        var plain = ElementFactory.Create(ElementKind.Text, 0, 0, 0, 1);
+        plain.Entrance = "Wiggle";
+        var plainEngine = new PlaybackEngine(new ExperienceDocument
+        {
+            StartSceneId = "still",
+            Scenes = { new Scene { Id = "still", Elements = { plain } } }
+        }, () => now);
+        plainEngine.Start();
+        Assert.Equal(1, plainEngine.Current!.Elements.Single().EffectOpacity);
+        Assert.Equal(0, plainEngine.Current.Elements.Single().EffectShiftX);
+
+        now = now.AddSeconds(2);
+        engine.PointerUp("go");
+        Assert.Equal("other", engine.Current.Id);
+        engine.PointerUp("back");
+        Assert.Equal("only", engine.Current.Id);
+        Assert.Equal(0, engine.Current.Elements.Single(e => e.Id == "title").EffectOpacity);
+        now = now.AddMilliseconds(900);
+        engine.Tick();
+        Assert.Equal(1, engine.Current.Elements.Single(e => e.Id == "title").EffectOpacity);
+        Assert.Equal(0, engine.Current.Elements.Single(e => e.Id == "go").EffectShiftX);
+    }
 }
