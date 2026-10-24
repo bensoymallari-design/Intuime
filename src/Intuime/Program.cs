@@ -11,6 +11,12 @@ internal static class Program
         if (args.Any(arg => arg == "--self-check"))
             return SelfCheck.Run();
 
+        if (OperatingSystem.IsLinux())
+        {
+            Environment.SetEnvironmentVariable("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+            Environment.SetEnvironmentVariable("GDK_BACKEND", "x11");
+        }
+
         BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         return 0;
     }

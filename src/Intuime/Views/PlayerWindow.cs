@@ -116,6 +116,19 @@ public sealed class PlayerWindow : Window
                 _hint.Opacity = Math.Max(0, _hint.Opacity - 0.04);
             LayoutVideos();
             UpdateTransports();
+            if (_page.IsVisible)
+            {
+                var keys = LinuxWebFrame.PollKeys();
+                if (keys.Escape)
+                {
+                    Close();
+                    return;
+                }
+                if (keys.Left)
+                    _engine.KeyPressed("Left");
+                if (keys.Right)
+                    _engine.KeyPressed("Right");
+            }
         };
         _timer.Start();
         Opened += (_, _) => Focus();
@@ -363,11 +376,20 @@ public sealed class PlayerWindow : Window
 
     private void LayoutPage()
     {
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (!_page.IsVisible)
+        {
+            LinuxWebFrame.Hide();
             return;
+        }
+
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
-        _page.Width = Math.Max(1, _engine.Live.Width * scale);
-        _page.Height = Math.Max(1, _engine.Live.Height * scale);
+        var width = Math.Max(1, _engine.Live.Width * scale);
+        var height = Math.Max(1, _engine.Live.Height * scale);
+        var originX = Math.Max(0, (Bounds.Width - width) / 2);
+        var originY = Math.Max(0, (Bounds.Height - height) / 2);
+        _page.Fit(width, height);
+        LinuxWebFrame.Show(handle, (int)originX, (int)originY, (int)width, (int)height);
     }
 
     private Border BuildPlayBar(Host host)

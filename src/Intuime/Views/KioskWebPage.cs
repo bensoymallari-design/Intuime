@@ -20,6 +20,16 @@ public sealed class KioskWebPage : Grid
         Background = Avalonia.Media.Brushes.Black;
     }
 
+    public void Fit(double width, double height)
+    {
+        Width = Math.Max(1, width);
+        Height = Math.Max(1, height);
+        if (_view == null)
+            return;
+        _view.Width = Width;
+        _view.Height = Height;
+    }
+
     public bool TryShow(string? raw, out string error)
     {
         if (!WebAddresses.TryNormalize(raw, out var url))
@@ -91,7 +101,7 @@ public sealed class KioskWebPage : Grid
             if (args is LinuxWpeWebViewEnvironmentRequestedEventArgs wpe)
                 wpe.PreferWebKitGtkInstead = true;
             if (args is GtkWebViewEnvironmentRequestedEventArgs gtk)
-                gtk.ExperimentalOffscreen = true;
+                gtk.ExperimentalOffscreen = false;
         };
         view.NavigationStarted += (_, args) =>
         {
