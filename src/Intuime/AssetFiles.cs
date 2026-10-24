@@ -61,6 +61,8 @@ public static class AssetFiles
         {
             scene.BackgroundImage = Relocate(scene.BackgroundImage, fromRoot, toRoot);
             scene.BackgroundVideo = Relocate(scene.BackgroundVideo, fromRoot, toRoot);
+            foreach (var layer in scene.Backgrounds)
+                layer.Source = Relocate(layer.Source, fromRoot, toRoot);
             foreach (var element in scene.Elements)
                 element.Source = Relocate(element.Source, fromRoot, toRoot);
         }

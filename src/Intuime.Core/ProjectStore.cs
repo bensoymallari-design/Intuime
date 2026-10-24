@@ -73,6 +73,12 @@ public static class ProjectStore
             scene.Id = Unique(scene.Id, seen);
             scene.Name = string.IsNullOrWhiteSpace(scene.Name) ? "Scene" : scene.Name;
             scene.Background = string.IsNullOrWhiteSpace(scene.Background) ? "#101820" : scene.Background;
+            scene.PullLegacyBackground();
+            foreach (var layer in scene.Backgrounds)
+            {
+                layer.Id = Unique(layer.Id, seen);
+                layer.Name = string.IsNullOrWhiteSpace(layer.Name) ? (layer.Video ? "Video" : "Picture") : layer.Name;
+            }
             foreach (var interaction in scene.Interactions)
                 Repair(interaction, seen);
             foreach (var element in scene.Elements)
@@ -104,6 +110,11 @@ public static class ProjectStore
                 yield return scene.BackgroundImage;
             if (!string.IsNullOrWhiteSpace(scene.BackgroundVideo))
                 yield return scene.BackgroundVideo;
+            foreach (var layer in scene.Backgrounds)
+            {
+                if (!string.IsNullOrWhiteSpace(layer.Source))
+                    yield return layer.Source;
+            }
             foreach (var element in scene.Elements)
             {
                 if (!string.IsNullOrWhiteSpace(element.Source))
