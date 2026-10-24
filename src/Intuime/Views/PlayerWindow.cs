@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -29,6 +28,7 @@ public sealed class PlayerWindow : Window
     private readonly Canvas _overlay = new();
     private readonly TextBlock _hint;
     private readonly TextBlock _status;
+    private readonly KioskWebPage _page = new();
     private readonly DispatcherTimer _timer;
     private readonly Dictionary<string, Host> _hosts = new();
     private double _fade;
@@ -77,15 +77,17 @@ public sealed class PlayerWindow : Window
             TextAlignment = TextAlignment.Center,
             IsVisible = false
         };
+        _page.Failed += ShowStatus;
         Content = new Grid
         {
-            Children = { _scaler, _overlay, _hint, _status }
+            Children = { _scaler, _overlay, _page, _hint, _status }
         };
 
         _engine.SceneChanged += () =>
         {
             _fade = 0;
             _status.IsVisible = false;
+            _page.HidePage();
             DisposeHosts();
             _surface.SetOmit(null);
             _surface.Rebuild();
@@ -114,6 +116,19 @@ public sealed class PlayerWindow : Window
                 _hint.Opacity = Math.Max(0, _hint.Opacity - 0.04);
             LayoutVideos();
             UpdateTransports();
+            if (_page.IsVisible)
+            {
+                var keys = LinuxWebFrame.PollKeys();
+                if (keys.Escape)
+                {
+                    Close();
+                    return;
+                }
+                if (keys.Left)
+                    _engine.KeyPressed("Left");
+                if (keys.Right)
+                    _engine.KeyPressed("Right");
+            }
         };
         _timer.Start();
         Opened += (_, _) => Focus();
@@ -149,6 +164,7 @@ public sealed class PlayerWindow : Window
         _scale.ScaleY = scale;
         _surface.Width = width;
         _surface.Height = height;
+        LayoutPage();
     }
 
     private void CreateHosts()
@@ -354,6 +370,26 @@ public sealed class PlayerWindow : Window
                 host.Bar.IsHitTestVisible = showBar;
             }
         }
+
+        LayoutPage();
+    }
+
+    private void LayoutPage()
+    {
+        var handle = TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (!_page.IsVisible)
+        {
+            LinuxWebFrame.Hide();
+            return;
+        }
+
+        var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
+        var width = Math.Max(1, _engine.Live.Width * scale);
+        var height = Math.Max(1, _engine.Live.Height * scale);
+        var originX = Math.Max(0, (Bounds.Width - width) / 2);
+        var originY = Math.Max(0, (Bounds.Height - height) / 2);
+        _page.Fit(width, height);
+        LinuxWebFrame.Show(handle, (int)originX, (int)originY, (int)width, (int)height);
     }
 
     private Border BuildPlayBar(Host host)
@@ -631,14 +667,15 @@ public sealed class PlayerWindow : Window
 
     private void OpenUrl(string url)
     {
-        try
+        if (!_page.TryShow(url, out var error))
         {
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+            ShowStatus(error);
+            return;
         }
-        catch (Exception ex)
-        {
-            ShowStatus(ex.Message);
-        }
+
+        _status.IsVisible = false;
+        _hint.IsVisible = false;
+        LayoutPage();
     }
 
     private void OnKey(object? sender, KeyEventArgs e)

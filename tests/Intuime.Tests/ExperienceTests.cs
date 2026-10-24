@@ -196,6 +196,18 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Web_addresses_stay_inside_http()
+    {
+        Assert.True(WebAddresses.TryNormalize("https://example.com", out var https));
+        Assert.Equal("https://example.com/", https);
+        Assert.True(WebAddresses.TryNormalize("example.com/visit", out var bare));
+        Assert.Equal("https://example.com/visit", bare);
+        Assert.False(WebAddresses.TryNormalize("javascript:alert(1)", out _));
+        Assert.False(WebAddresses.TryNormalize("file:///tmp/page.html", out _));
+        Assert.False(WebAddresses.TryNormalize("   ", out _));
+    }
+
+    [Fact]
     public void Conditions_double_tap_show_hide_and_restart()
     {
         var scene = new Scene

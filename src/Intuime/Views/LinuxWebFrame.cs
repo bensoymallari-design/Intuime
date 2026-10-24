@@ -1,0 +1,162 @@
+using System.Runtime.InteropServices;
+
+namespace Intuime.Views;
+
+static class LinuxWebFrame
+{
+    private static readonly HashSet<IntPtr> Owned = new();
+    private static readonly XErrorHandler IgnoreError = (_, _) => 0;
+    private static readonly byte[] Keymap = new byte[32];
+    private static IntPtr _display;
+    private static bool _handlerReady;
+    private static int _escapeCode;
+    private static int _leftCode;
+    private static int _rightCode;
+    private static bool _escapeWasDown;
+    private static bool _leftWasDown;
+    private static bool _rightWasDown;
+
+    public static void Show(IntPtr playerWindow, int x, int y, int width, int height)
+    {
+        if (!OperatingSystem.IsLinux() || playerWindow == IntPtr.Zero || width < 1 || height < 1)
+            return;
+        var display = Display();
+        if (display == IntPtr.Zero)
+            return;
+
+        foreach (var child in Children(display, playerWindow))
+        {
+            if (!Owned.Contains(child) && !IsTiny(display, child))
+                continue;
+            Owned.Add(child);
+            Place(display, child, x, y, width, height);
+        }
+        XFlush(display);
+    }
+
+    public readonly record struct KeyEdges(bool Escape, bool Left, bool Right);
+
+    public static KeyEdges PollKeys()
+    {
+        if (!OperatingSystem.IsLinux())
+            return default;
+        var display = Display();
+        if (display == IntPtr.Zero)
+            return default;
+        EnsureKeyCodes(display);
+        if (XQueryKeymap(display, Keymap) == 0)
+            return default;
+        var escape = Down(_escapeCode);
+        var left = Down(_leftCode);
+        var right = Down(_rightCode);
+        var edges = new KeyEdges(escape && !_escapeWasDown, left && !_leftWasDown, right && !_rightWasDown);
+        _escapeWasDown = escape;
+        _leftWasDown = left;
+        _rightWasDown = right;
+        return edges;
+    }
+
+    public static void Hide()
+    {
+        if (!OperatingSystem.IsLinux() || Owned.Count == 0)
+            return;
+        var display = Display();
+        if (display == IntPtr.Zero)
+            return;
+        foreach (var window in Owned)
+            XUnmapWindow(display, window);
+        XFlush(display);
+    }
+
+    private static void Place(IntPtr display, IntPtr window, int x, int y, int width, int height)
+    {
+        XMoveResizeWindow(display, window, x, y, (uint)width, (uint)height);
+        XMapWindow(display, window);
+        foreach (var child in Children(display, window))
+            Place(display, child, 0, 0, width, height);
+    }
+
+    private static bool IsTiny(IntPtr display, IntPtr window)
+    {
+        if (XGetGeometry(display, window, out _, out _, out _, out var width, out var height, out _, out _) == 0)
+            return false;
+        return width <= 8 || height <= 8;
+    }
+
+    private static List<IntPtr> Children(IntPtr display, IntPtr window)
+    {
+        var list = new List<IntPtr>();
+        if (XQueryTree(display, window, out _, out _, out var children, out var count) == 0 || children == IntPtr.Zero)
+            return list;
+        try
+        {
+            for (var i = 0; i < count; i++)
+                list.Add(Marshal.ReadIntPtr(children, i * IntPtr.Size));
+        }
+        finally
+        {
+            XFree(children);
+        }
+        return list;
+    }
+
+    private static void EnsureKeyCodes(IntPtr display)
+    {
+        if (_escapeCode != 0)
+            return;
+        _escapeCode = XKeysymToKeycode(display, 0xff1b);
+        _leftCode = XKeysymToKeycode(display, 0xff51);
+        _rightCode = XKeysymToKeycode(display, 0xff53);
+    }
+
+    private static bool Down(int keycode) =>
+        keycode > 0 && (Keymap[keycode / 8] & (1 << (keycode % 8))) != 0;
+
+    private static IntPtr Display()
+    {
+        if (_display != IntPtr.Zero)
+            return _display;
+        _display = XOpenDisplay(IntPtr.Zero);
+        if (_display != IntPtr.Zero && !_handlerReady)
+        {
+            XSetErrorHandler(IgnoreError);
+            _handlerReady = true;
+        }
+        return _display;
+    }
+
+    private delegate int XErrorHandler(IntPtr display, IntPtr errorEvent);
+
+    [DllImport("libX11.so.6")]
+    private static extern IntPtr XOpenDisplay(IntPtr name);
+
+    [DllImport("libX11.so.6")]
+    private static extern IntPtr XSetErrorHandler(XErrorHandler handler);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XQueryTree(IntPtr display, IntPtr window, out IntPtr root, out IntPtr parent, out IntPtr children, out uint count);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XFree(IntPtr data);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XGetGeometry(IntPtr display, IntPtr window, out IntPtr root, out int x, out int y, out uint width, out uint height, out uint border, out uint depth);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XMoveResizeWindow(IntPtr display, IntPtr window, int x, int y, uint width, uint height);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XMapWindow(IntPtr display, IntPtr window);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XUnmapWindow(IntPtr display, IntPtr window);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XFlush(IntPtr display);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XQueryKeymap(IntPtr display, byte[] keys);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XKeysymToKeycode(IntPtr display, uint keysym);
+}

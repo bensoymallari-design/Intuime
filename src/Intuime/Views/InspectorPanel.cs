@@ -176,7 +176,10 @@ public sealed class InspectorPanel : StackPanel
             Note($"Turn this off to start with the bar hidden. In Show, Hide, or Toggle, choose \"{element.Name} play bar\" to reveal it on the video, including the time.");
         }
         if (element.Kind == ElementKind.WebLink)
+        {
             Text("URL", element.Url, value => element.Url = value);
+            Note("In Play, this page stays inside Intuime and fills the scene, the same way the rest of the kiosk fits the screen. There is no address bar, and no close, minimize, or maximize buttons.");
+        }
         if (element.Kind == ElementKind.Clock)
             Text("Format", element.ClockFormat, value => element.ClockFormat = value);
         if (element.Kind is ElementKind.Text or ElementKind.Button or ElementKind.DataList or ElementKind.Counter)
@@ -381,7 +384,18 @@ public sealed class InspectorPanel : StackPanel
                 });
                 break;
         }
-        if (action.Kind is ActionKind.SetText or ActionKind.OpenUrl or ActionKind.SetBackground or ActionKind.SetFill)
+        if (action.Kind == ActionKind.OpenUrl)
+        {
+            panel.Children.Add(TextControl("URL", action.Text, value => action.Text = value));
+            panel.Children.Add(new TextBlock
+            {
+                Text = "This opens inside the kiosk and fills the scene. It does not open a browser window, and it has no close or minimize buttons.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Painting.Brush(Painting.Muted),
+                FontSize = 12
+            });
+        }
+        if (action.Kind is ActionKind.SetText or ActionKind.SetBackground or ActionKind.SetFill)
             panel.Children.Add(TextControl(action.Kind == ActionKind.SetFill || action.Kind == ActionKind.SetBackground ? "Color" : "Value", action.Text, value => action.Text = value));
         if (action.Kind == ActionKind.SetOpacity)
             panel.Children.Add(NumberControl("Opacity 0-1", action.Number, value => action.Number = value));
