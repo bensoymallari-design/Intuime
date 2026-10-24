@@ -14,16 +14,8 @@ namespace Intuime.Rendering;
 public sealed class SceneSurface : UserControl, ICustomHitTest
 {
     private readonly Border _page = new();
-    private readonly Image _pageImage = new() { IsHitTestVisible = false, Stretch = Stretch.UniformToFill };
     private readonly Canvas _background = new() { IsHitTestVisible = false };
-    private readonly Border _mediaFrame = new()
-    {
-        IsHitTestVisible = false,
-        IsVisible = false,
-        BorderBrush = Painting.Brush("#E7A23A"),
-        BorderThickness = new Thickness(3),
-        Background = Brushes.Transparent
-    };
+    private string _backgroundSignature = "";
     private readonly DesignGrid _grid = new() { IsHitTestVisible = false };
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
     private readonly Canvas _marqueeLayer = new() { IsHitTestVisible = false };
@@ -56,14 +48,14 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private double? _clipWidth;
     private double? _clipHeight;
     private Func<SceneElement, bool>? _include;
+    private Func<BackgroundLayer, bool>? _backgroundInclude;
     private Func<SceneElement, bool>? _omit;
     private string? _backgroundElementId;
+    private int? _screen;
     private bool _passThrough;
 
     public SceneSurface()
     {
-        _background.Children.Add(_pageImage);
-        _background.Children.Add(_mediaFrame);
         var root = new Grid();
         root.Children.Add(_page);
         root.Children.Add(_background);
@@ -204,13 +196,16 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         _assetRoot = assetRoot;
     }
 
-    public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include, string? backgroundElementId = null)
+    public void UseScreen(int screen) => _screen = screen;
+
+    public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include, string? backgroundElementId = null, Func<BackgroundLayer, bool>? backgrounds = null)
     {
         _originX = originX;
         _originY = originY;
         _clipWidth = Math.Max(1, width);
         _clipHeight = Math.Max(1, height);
         _include = include;
+        _backgroundInclude = backgrounds;
         _backgroundElementId = backgroundElementId;
         _clearPage = true;
         Background = Brushes.Transparent;
@@ -276,30 +271,19 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         if (scene == null)
         {
             _page.Background = Painting.Brush("#101820");
-            _pageImage.Source = null;
-            _pageImage.IsVisible = false;
-            _mediaFrame.IsVisible = false;
+            _background.Children.Clear();
+            _backgroundSignature = "";
             return;
         }
 
+        scene.PullLegacyBackground();
         var size = ClipSize();
         Width = size.Width;
         Height = size.Height;
         _canvas.Width = Width;
         _canvas.Height = Height;
-        if (_clearPage)
-        {
-            _page.Background = Brushes.Transparent;
-            _pageImage.Source = null;
-            _pageImage.IsVisible = false;
-            _mediaFrame.IsVisible = false;
-        }
-        else
-        {
-            _page.Background = Painting.Brush(scene.Background, "#101820");
-            _pageImage.Source = LoadBitmap(scene.BackgroundImage);
-            PlaceBackground(scene);
-        }
+        _page.Background = _clearPage ? Brushes.Transparent : Painting.Brush(scene.Background, "#101820");
+        PlaceBackgrounds(scene);
 
         foreach (var element in scene.Elements.Select((value, index) => (value, index)).OrderBy(item => item.value.Z).ThenBy(item => item.index))
         {
@@ -310,43 +294,73 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
 
     }
 
-    private void PlaceBackground(Scene scene)
+    private void PlaceBackgrounds(Scene scene)
     {
         var size = ClipSize();
-        var box = scene.BackgroundBox(size.Width, size.Height);
-        var hasImage = _pageImage.Source != null;
-        _pageImage.IsVisible = hasImage;
-        _pageImage.Stretch = scene.HasCustomBackgroundSize ? Stretch.Fill : Stretch.UniformToFill;
-        Canvas.SetLeft(_pageImage, box.X);
-        Canvas.SetTop(_pageImage, box.Y);
-        _pageImage.Width = Math.Max(1, box.Width);
-        _pageImage.Height = Math.Max(1, box.Height);
-
-        var showFrame = _design && (scene.HasCustomBackgroundSize || !string.IsNullOrWhiteSpace(scene.BackgroundVideo));
-        _mediaFrame.IsVisible = showFrame;
-        if (!showFrame)
+        var signature = _originX.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+            + "," + _originY.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+            + "|" + _clearPage + "|" + (_backgroundInclude != null) + "|" + _design;
+        for (var index = 0; index < scene.Backgrounds.Count; index++)
+        {
+            var layer = scene.Backgrounds[index];
+            var box = layer.Box(size.Width, size.Height);
+            signature += $"|{index}:{layer.Id}:{layer.Source}:{layer.Video}:{layer.HasCustomSize}:{box.X}:{box.Y}:{box.Width}:{box.Height}";
+        }
+        if (signature == _backgroundSignature)
             return;
-        Canvas.SetLeft(_mediaFrame, box.X);
-        Canvas.SetTop(_mediaFrame, box.Y);
-        _mediaFrame.Width = Math.Max(1, box.Width);
-        _mediaFrame.Height = Math.Max(1, box.Height);
-        _mediaFrame.BorderThickness = scene.HasCustomBackgroundSize ? new Thickness(3) : new Thickness(0);
-        var label = string.IsNullOrWhiteSpace(scene.BackgroundVideo)
-            ? ""
-            : "Background video  ·  " + System.IO.Path.GetFileName(scene.BackgroundVideo) + "  ·  press Play";
-        _mediaFrame.Child = string.IsNullOrEmpty(label)
-            ? null
-            : new Border
+        _backgroundSignature = signature;
+        _background.Children.Clear();
+        for (var index = 0; index < scene.Backgrounds.Count; index++)
+        {
+            var layer = scene.Backgrounds[index];
+            var drawImage = !layer.Video && (_backgroundInclude != null ? _backgroundInclude(layer) : !_clearPage);
+            var drawFrame = _design && _backgroundInclude == null && !_clearPage
+                && (layer.Video || layer.HasCustomSize || scene.Backgrounds.Count > 1);
+            if (!drawImage && !drawFrame)
+                continue;
+            var box = layer.Box(size.Width, size.Height);
+            if (drawImage)
             {
-                Background = Painting.Brush("#E6101820"),
-                Padding = new Thickness(14, 8),
-                CornerRadius = new CornerRadius(10),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(16),
+                var image = new Image
+                {
+                    IsHitTestVisible = false,
+                    Stretch = layer.HasCustomSize ? Stretch.Fill : Stretch.UniformToFill,
+                    Source = LoadBitmap(layer.Source),
+                    Width = Math.Max(1, box.Width),
+                    Height = Math.Max(1, box.Height)
+                };
+                Canvas.SetLeft(image, box.X - _originX);
+                Canvas.SetTop(image, box.Y - _originY);
+                _background.Children.Add(image);
+            }
+            if (!drawFrame)
+                continue;
+            var file = string.IsNullOrWhiteSpace(layer.Source) ? layer.Name : System.IO.Path.GetFileName(layer.Source);
+            var label = "Layer " + (index + 1) + (layer.Video ? "  ·  " + file + "  ·  press Play" : "  ·  " + file);
+            var frame = new Border
+            {
                 IsHitTestVisible = false,
-                Child = new TextBlock { Text = label, Foreground = Brushes.White, FontSize = 18 }
+                Background = Brushes.Transparent,
+                BorderBrush = Painting.Brush("#E7A23A"),
+                BorderThickness = layer.HasCustomSize ? new Thickness(3) : new Thickness(0),
+                Width = Math.Max(1, box.Width),
+                Height = Math.Max(1, box.Height),
+                Child = new Border
+                {
+                    Background = Painting.Brush("#E6101820"),
+                    Padding = new Thickness(14, 8),
+                    CornerRadius = new CornerRadius(10),
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Margin = new Thickness(16),
+                    IsHitTestVisible = false,
+                    Child = new TextBlock { Text = label, Foreground = Brushes.White, FontSize = 18 }
+                }
             };
+            Canvas.SetLeft(frame, box.X - _originX);
+            Canvas.SetTop(frame, box.Y - _originY);
+            _background.Children.Add(frame);
+        }
     }
 
     private bool Shown(SceneElement element) =>
@@ -367,12 +381,8 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         }
 
         if (!_clearPage)
-        {
             _page.Background = Painting.Brush(scene.Background, "#101820");
-            if (_pageImage.Source == null && !string.IsNullOrWhiteSpace(scene.BackgroundImage))
-                _pageImage.Source = LoadBitmap(scene.BackgroundImage);
-            PlaceBackground(scene);
-        }
+        PlaceBackgrounds(scene);
         foreach (var element in scene.Elements)
         {
             if (!_nodes.TryGetValue(element.Id, out var node))
@@ -803,7 +813,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                 if (!string.IsNullOrEmpty(_backgroundElementId))
                     _engine?.PointerUp(_backgroundElementId);
                 else
-                    _engine?.BackgroundTap();
+                    _engine?.BackgroundTap(Scene()?.Id);
             }
             return;
         }
@@ -1020,7 +1030,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         }
     }
 
-    private Scene? Scene() => _design ? _session?.ActiveScene : _engine?.Current;
+    private Scene? Scene() => _design ? _session?.ActiveScene : _screen is int screen ? _engine?.SceneFor(screen) : _engine?.Current;
     private ExperienceDocument? Document() => _design ? _session?.Document : _engine?.Live;
 
     private (double Width, double Height) ClipSize()

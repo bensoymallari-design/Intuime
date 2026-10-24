@@ -458,6 +458,51 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Background_layers_keep_order_and_swap()
+    {
+        var scene = new Scene
+        {
+            Id = "room",
+            BackgroundImage = "assets/aurora.png",
+            BackgroundVideo = "assets/studio.mp4",
+            BackgroundVideoLoop = false,
+            BackgroundVideoSound = true,
+            BackgroundFill = false,
+            BackgroundX = 10,
+            BackgroundY = 20,
+            BackgroundWidth = 400,
+            BackgroundHeight = 300
+        };
+        var clone = ProjectStore.Clone(new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } }).Scenes.Single();
+        Assert.Equal(2, clone.Backgrounds.Count);
+        Assert.False(clone.Backgrounds[0].Video);
+        Assert.Equal("assets/aurora.png", clone.Backgrounds[0].Source);
+        Assert.True(clone.Backgrounds[1].Video);
+        Assert.False(clone.Backgrounds[1].Loop);
+        Assert.True(clone.Backgrounds[1].Sound);
+        Assert.Equal((10d, 20d, 400d, 300d), clone.Backgrounds[1].Box(1920, 1080));
+
+        var logo = BackgroundLayers.Add(clone, video: false, "assets/logo.png");
+        Assert.Equal(logo.Id, clone.Backgrounds[^1].Id);
+        Assert.True(logo.Fill);
+        BackgroundLayers.Move(clone, logo.Id, -1);
+        Assert.Equal(logo.Id, clone.Backgrounds[1].Id);
+        BackgroundLayers.Move(clone, logo.Id, -1);
+        Assert.Equal(logo.Id, clone.Backgrounds[0].Id);
+        BackgroundLayers.Move(clone, logo.Id, -1);
+        Assert.Equal(logo.Id, clone.Backgrounds[0].Id);
+        BackgroundLayers.Move(clone, logo.Id, 1);
+        Assert.Equal(logo.Id, clone.Backgrounds[1].Id);
+        BackgroundLayers.Remove(clone, logo.Id);
+        Assert.Equal(2, clone.Backgrounds.Count);
+        Assert.DoesNotContain(clone.Backgrounds, layer => layer.Id == logo.Id);
+
+        var again = ProjectStore.Clone(new ExperienceDocument { Scenes = { clone } }).Scenes.Single();
+        Assert.Equal(clone.Backgrounds.Select(layer => layer.Source), again.Backgrounds.Select(layer => layer.Source));
+        Assert.Equal(clone.Backgrounds.Select(layer => layer.Video), again.Backgrounds.Select(layer => layer.Video));
+    }
+
+    [Fact]
     public void Background_video_and_effect_strength_round_trip()
     {
         var scene = new Scene
@@ -479,19 +524,19 @@ public class ExperienceTests
         scene.BackgroundHeight = 360;
         var document = new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } };
         var clone = ProjectStore.Clone(document).Scenes.Single();
-        Assert.Equal("assets/city.mp4", clone.BackgroundVideo);
-        Assert.False(clone.BackgroundVideoLoop);
-        Assert.True(clone.BackgroundVideoSound);
-        Assert.False(clone.BackgroundFill);
-        Assert.Equal(40, clone.BackgroundX);
-        Assert.Equal(80, clone.BackgroundY);
-        Assert.Equal(640, clone.BackgroundWidth);
-        Assert.Equal(360, clone.BackgroundHeight);
-        Assert.Equal((40d, 80d, 640d, 360d), clone.BackgroundBox(1920, 1080));
+        Assert.Equal("", clone.BackgroundVideo);
+        var video = Assert.Single(clone.Backgrounds);
+        Assert.True(video.Video);
+        Assert.Equal("assets/city.mp4", video.Source);
+        Assert.False(video.Loop);
+        Assert.True(video.Sound);
+        Assert.False(video.Fill);
+        Assert.Equal((40d, 80d, 640d, 360d), video.Box(1920, 1080));
         var fresh = new Scene();
         Assert.True(fresh.BackgroundFill);
         Assert.False(fresh.HasCustomBackgroundSize);
         Assert.Equal((0d, 0d, 1920d, 1080d), fresh.BackgroundBox(1920, 1080));
+        Assert.Empty(fresh.Backgrounds);
         Assert.Equal("Squash", clone.Elements.Single().TapEffect);
         Assert.Equal(1.6, clone.Elements.Single().TapStrength);
         Assert.True(new Scene().BackgroundVideoLoop);
@@ -500,9 +545,11 @@ public class ExperienceTests
         var now = new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc);
         var engine = new PlaybackEngine(document, () => now);
         engine.Start();
-        Assert.Equal(640, engine.Current!.BackgroundWidth);
-        Assert.Equal(360, engine.Current.BackgroundHeight);
-        Assert.False(engine.Current.BackgroundFill);
+        var played = Assert.Single(engine.Current!.Backgrounds);
+        Assert.Equal(640, played.Width);
+        Assert.Equal(360, played.Height);
+        Assert.False(played.Fill);
+        Assert.True(played.Video);
         var live = engine.Current.Elements.Single();
         engine.PointerUp(live.Id);
         now = now.AddMilliseconds(260);
@@ -744,5 +791,90 @@ public class ExperienceTests
         engine.Tick();
         Assert.Equal(1, engine.Current.Elements.Single(e => e.Id == "title").EffectOpacity);
         Assert.Equal(0, engine.Current.Elements.Single(e => e.Id == "go").EffectShiftX);
+    }
+
+    [Fact]
+    public void Each_screen_keeps_its_own_scene_and_its_own_start()
+    {
+        var go = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        go.Id = "go";
+        go.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "film" } }
+        });
+        var later = ElementFactory.Create(ElementKind.Button, 0, 100, 0, 1);
+        later.Id = "later";
+        later.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions =
+            {
+                new ExperienceAction { Kind = ActionKind.Wait, DurationMs = 500 },
+                new ExperienceAction { Kind = ActionKind.SetVariable, VariableName = "stayed", VariableValue = "yes" }
+            }
+        });
+        var home = new Scene { Id = "home", Name = "Home", Screen = 0, Elements = { go, later } };
+        var credits = new Scene { Id = "credits", Name = "Credits", Screen = 0 };
+        var loop = new Scene { Id = "loop", Name = "Loop", Screen = 1 };
+        var film = new Scene { Id = "film", Name = "Film", Screen = 1 };
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "home",
+            ScreenStarts = { new ScreenStart { Screen = 1, SceneId = "loop" } },
+            Variables = { new ExperienceVariable { Name = "stayed", Value = "no" } },
+            Scenes = { home, credits, loop, film },
+            Interactions =
+            {
+                new Interaction
+                {
+                    Id = "next",
+                    Trigger = TriggerKind.Key,
+                    Key = "Right",
+                    Actions = { new ExperienceAction { Kind = ActionKind.NextScene } }
+                }
+            }
+        };
+
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(document));
+        Assert.Equal(1, loaded.Scenes.Single(scene => scene.Id == "film").Screen);
+        Assert.Equal("loop", Assert.Single(loaded.ScreenStarts).SceneId);
+        Assert.Equal("home", loaded.StartSceneId);
+
+        var now = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var engine = new PlaybackEngine(loaded, () => now);
+        engine.Start();
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("loop", engine.SceneFor(1)!.Id);
+        Assert.Equal("home", engine.Current!.Id);
+
+        engine.PointerUp("later");
+        engine.PointerUp("go");
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        now = now.AddMilliseconds(500);
+        engine.Tick();
+        Assert.Equal("yes", TextTemplates.Get(engine.Live, "stayed"));
+        Assert.Equal("home", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        engine.KeyPressed("Right", 0);
+        Assert.Equal("credits", engine.SceneFor(0)!.Id);
+        Assert.Equal("film", engine.SceneFor(1)!.Id);
+
+        engine.KeyPressed("Right", 1);
+        Assert.Equal("credits", engine.SceneFor(0)!.Id);
+        Assert.Equal("loop", engine.SceneFor(1)!.Id);
+
+        var session = new EditorSession();
+        session.Load(ProjectStore.Clone(document), null, "", markClean: true);
+        var moved = session.Document.Scenes.Single(scene => scene.Id == "loop");
+        session.SetScreenStart(moved);
+        Assert.True(DisplayScreens.IsStart(session.Document, moved));
+        moved.Screen = 0;
+        session.SetScreenStart(moved);
+        Assert.Equal("loop", session.Document.StartSceneId);
+        Assert.DoesNotContain(session.Document.ScreenStarts, item => item.SceneId == "loop");
     }
 }

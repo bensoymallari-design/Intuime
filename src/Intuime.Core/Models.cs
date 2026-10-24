@@ -71,9 +71,57 @@ public sealed class ExperienceDocument
     public int Width { get; set; } = 1920;
     public int Height { get; set; } = 1080;
     public string? StartSceneId { get; set; }
+    public List<ScreenStart> ScreenStarts { get; set; } = new();
     public List<ExperienceVariable> Variables { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
     public List<Scene> Scenes { get; set; } = new();
+}
+
+public sealed class ScreenStart
+{
+    public int Screen { get; set; }
+    public string SceneId { get; set; } = "";
+}
+
+public static class DisplayScreens
+{
+    public static readonly string[] Names = { "Main screen", "Extended screen", "Screen 3", "Screen 4", "Screen 5", "Screen 6" };
+
+    public static string Name(int screen) =>
+        screen >= 0 && screen < Names.Length ? Names[screen] : "Screen " + (screen + 1);
+
+    public static int IndexOf(string name)
+    {
+        var index = Array.IndexOf(Names, name);
+        return index < 0 ? 0 : index;
+    }
+
+    public static bool IsStart(ExperienceDocument document, Scene scene)
+    {
+        var screen = Math.Max(0, scene.Screen);
+        if (screen == 0)
+            return document.StartSceneId == scene.Id;
+        return document.ScreenStarts.Any(item => item.Screen == screen && item.SceneId == scene.Id);
+    }
+
+    public static string? StartId(ExperienceDocument document, int screen)
+    {
+        screen = Math.Max(0, screen);
+        if (screen == 0)
+        {
+            var marked = document.Scenes.FirstOrDefault(scene => scene.Id == document.StartSceneId && Math.Max(0, scene.Screen) == 0);
+            if (marked != null)
+                return marked.Id;
+        }
+        else
+        {
+            var id = document.ScreenStarts.FirstOrDefault(item => item.Screen == screen)?.SceneId;
+            var marked = document.Scenes.FirstOrDefault(scene => scene.Id == id && Math.Max(0, scene.Screen) == screen);
+            if (marked != null)
+                return marked.Id;
+        }
+        return document.Scenes.FirstOrDefault(scene => Math.Max(0, scene.Screen) == screen)?.Id;
+    }
 }
 
 public sealed class ExperienceVariable
@@ -86,6 +134,7 @@ public sealed class Scene
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Scene";
+    public int Screen { get; set; }
     public string Background { get; set; } = "#101820";
     public string BackgroundImage { get; set; } = "";
     public string BackgroundVideo { get; set; } = "";
@@ -96,6 +145,7 @@ public sealed class Scene
     public double BackgroundY { get; set; }
     public double BackgroundWidth { get; set; }
     public double BackgroundHeight { get; set; }
+    public List<BackgroundLayer> Backgrounds { get; set; } = new();
 
     [JsonIgnore]
     public bool HasCustomBackgroundSize =>
@@ -107,8 +157,111 @@ public sealed class Scene
             return (0, 0, Math.Max(1, sceneWidth), Math.Max(1, sceneHeight));
         return (BackgroundX, BackgroundY, BackgroundWidth, BackgroundHeight);
     }
+
+    public void PullLegacyBackground()
+    {
+        if (Backgrounds.Count > 0)
+            return;
+        var hasImage = !string.IsNullOrWhiteSpace(BackgroundImage);
+        var hasVideo = !string.IsNullOrWhiteSpace(BackgroundVideo);
+        if (!hasImage && !hasVideo)
+            return;
+        if (hasImage)
+            Backgrounds.Add(LegacyLayer(false, BackgroundImage, "Picture"));
+        if (hasVideo)
+            Backgrounds.Add(LegacyLayer(true, BackgroundVideo, "Video"));
+        BackgroundImage = "";
+        BackgroundVideo = "";
+        BackgroundVideoLoop = true;
+        BackgroundVideoSound = false;
+        BackgroundFill = true;
+        BackgroundX = 0;
+        BackgroundY = 0;
+        BackgroundWidth = 0;
+        BackgroundHeight = 0;
+    }
+
+    private BackgroundLayer LegacyLayer(bool video, string source, string name) => new()
+    {
+        Id = Ids.New(),
+        Name = name,
+        Source = source,
+        Video = video,
+        Loop = !video || BackgroundVideoLoop,
+        Sound = video && BackgroundVideoSound,
+        Fill = BackgroundFill,
+        X = BackgroundX,
+        Y = BackgroundY,
+        Width = BackgroundWidth,
+        Height = BackgroundHeight
+    };
+
     public List<SceneElement> Elements { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
+}
+
+public sealed class BackgroundLayer
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "Picture";
+    public string Source { get; set; } = "";
+    public bool Video { get; set; }
+    public bool Loop { get; set; } = true;
+    public bool Sound { get; set; }
+    public bool Fill { get; set; } = true;
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+
+    [JsonIgnore]
+    public bool HasCustomSize => !Fill && Width >= 8 && Height >= 8;
+
+    public (double X, double Y, double Width, double Height) Box(double sceneWidth, double sceneHeight)
+    {
+        if (!HasCustomSize)
+            return (0, 0, Math.Max(1, sceneWidth), Math.Max(1, sceneHeight));
+        return (X, Y, Width, Height);
+    }
+
+    public bool Hits(double x, double y, double width, double height, double sceneWidth, double sceneHeight)
+    {
+        var box = Box(sceneWidth, sceneHeight);
+        return box.X < x + width && box.X + box.Width > x && box.Y < y + height && box.Y + box.Height > y;
+    }
+}
+
+public static class BackgroundLayers
+{
+    public static BackgroundLayer Add(Scene scene, bool video, string source)
+    {
+        scene.PullLegacyBackground();
+        var layer = new BackgroundLayer
+        {
+            Id = Ids.New(),
+            Name = video ? "Video" : "Picture",
+            Source = source,
+            Video = video,
+            Loop = true,
+            Fill = true
+        };
+        scene.Backgrounds.Add(layer);
+        return layer;
+    }
+
+    public static void Move(Scene scene, string id, int direction)
+    {
+        var index = scene.Backgrounds.FindIndex(layer => layer.Id == id);
+        var next = index + direction;
+        if (index < 0 || next < 0 || next >= scene.Backgrounds.Count)
+            return;
+        var layer = scene.Backgrounds[index];
+        scene.Backgrounds.RemoveAt(index);
+        scene.Backgrounds.Insert(next, layer);
+    }
+
+    public static void Remove(Scene scene, string id) =>
+        scene.Backgrounds.RemoveAll(layer => layer.Id == id);
 }
 
 public sealed class SceneElement

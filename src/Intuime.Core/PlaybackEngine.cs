@@ -14,10 +14,11 @@ public sealed class PlaybackEngine
     private int _depth;
     private int _epoch;
     private int _deferDepth;
-    private bool _dropActiveSequence;
     private DeferredNav _deferredNav;
     private string? _deferredSceneId;
     private bool _deferredLeave;
+    private readonly Dictionary<int, string> _showing = new();
+    private int _focusScreen;
 
     public PlaybackEngine(ExperienceDocument original, Func<DateTime>? clock = null)
     {
@@ -28,7 +29,14 @@ public sealed class PlaybackEngine
 
     public ExperienceDocument Original { get; }
     public ExperienceDocument Live { get; }
-    public Scene? Current { get; private set; }
+    public Scene? Current => SceneFor(_focusScreen);
+
+    public Scene? SceneFor(int screen) =>
+        _showing.TryGetValue(screen, out var id) ? Live.Scenes.FirstOrDefault(sceneItem => sceneItem.Id == id) : null;
+
+    public IEnumerable<int> OpenScreens => _showing.Keys.OrderBy(screen => screen);
+
+    public event Action<int>? ScreenChanged;
     public bool ExitRequested { get; private set; }
 
     public event Action? Changed;
@@ -39,10 +47,13 @@ public sealed class PlaybackEngine
 
     public void Start()
     {
-        var start = Live.Scenes.FirstOrDefault(s => s.Id == Live.StartSceneId) ?? Live.Scenes.FirstOrDefault();
-        if (start == null)
-            return;
-        Enter(start.Id, runLeave: false);
+        var screens = Live.Scenes.Select(scene => Math.Max(0, scene.Screen)).Distinct().OrderBy(screen => screen == 0 ? 1 : 0).ThenBy(screen => screen).ToList();
+        foreach (var screen in screens)
+        {
+            var start = DisplayScreens.StartId(Live, screen);
+            if (!string.IsNullOrEmpty(start))
+                Enter(start, runLeave: false);
+        }
     }
 
     public void Tick()
@@ -72,29 +83,33 @@ public sealed class PlaybackEngine
 
     public void NotifyActivity()
     {
-        if (Current == null)
-            return;
         var now = _clock();
-        foreach (var interaction in Enumerate(Current).Where(i => i.Trigger == TriggerKind.Timer && i.ResetOnActivity))
+        foreach (var scene in Showing())
         {
-            _timerArmed[interaction.Id] = now;
-            _timerOnce.Remove(interaction.Id);
+            foreach (var interaction in Enumerate(scene).Where(i => i.Trigger == TriggerKind.Timer && i.ResetOnActivity))
+            {
+                _timerArmed[interaction.Id] = now;
+                _timerOnce.Remove(interaction.Id);
+            }
         }
     }
 
-    public void BackgroundTap()
+    public void BackgroundTap() => BackgroundTap(null);
+
+    public void BackgroundTap(string? sceneId)
     {
-        if (Current == null)
+        var scene = string.IsNullOrEmpty(sceneId) ? Current : Showing().FirstOrDefault(item => item.Id == sceneId) ?? Current;
+        if (scene == null)
             return;
+        _focusScreen = Math.Max(0, scene.Screen);
         NotifyActivity();
-        Run(Current.Interactions, TriggerKind.Tap, null, null);
+        Run(scene.Interactions, TriggerKind.Tap, null, null);
         Changed?.Invoke();
     }
 
     public void PointerDown(string elementId)
     {
-        var element = Find(elementId);
-        if (element == null || !element.IsVisible)
+        if (!FocusElement(elementId, out var element) || !element!.IsVisible)
             return;
         NotifyActivity();
         Run(element.Interactions, TriggerKind.Press, element, null);
@@ -103,8 +118,7 @@ public sealed class PlaybackEngine
 
     public void PointerUp(string elementId)
     {
-        var element = Find(elementId);
-        if (element == null || !element.IsVisible)
+        if (!FocusElement(elementId, out var element) || !element!.IsVisible)
             return;
         NotifyActivity();
         var holdNavigation = TapEffects.Known(element.TapEffect);
@@ -131,17 +145,23 @@ public sealed class PlaybackEngine
         Changed?.Invoke();
     }
 
-    public void KeyPressed(string key)
+    public void KeyPressed(string key) => KeyPressed(key, -1);
+
+    public void KeyPressed(string key, int screen)
     {
         if (string.IsNullOrWhiteSpace(key))
             return;
+        if (screen >= 0 && _showing.ContainsKey(screen))
+            _focusScreen = screen;
         NotifyActivity();
-        if (Current != null)
+        var scene = Current;
+        if (scene != null)
         {
-            Run(Current.Interactions, TriggerKind.Key, null, key);
-            if (Current != null)
+            Run(scene.Interactions, TriggerKind.Key, null, key);
+            scene = Current;
+            if (scene != null)
             {
-                foreach (var element in Current.Elements.Where(e => e.IsVisible).ToList())
+                foreach (var element in scene.Elements.Where(e => e.IsVisible).ToList())
                     Run(element.Interactions, TriggerKind.Key, element, key);
             }
         }
@@ -151,8 +171,7 @@ public sealed class PlaybackEngine
 
     public void SelectDataItem(string elementId, int index)
     {
-        var element = Find(elementId);
-        if (element == null || !element.IsVisible)
+        if (!FocusElement(elementId, out var element) || !element!.IsVisible)
             return;
         var items = Lines(element.Text);
         if (index < 0 || index >= items.Count)
@@ -174,8 +193,7 @@ public sealed class PlaybackEngine
 
     public void NudgeCounter(string elementId, int direction)
     {
-        var element = Find(elementId);
-        if (element == null || !element.IsVisible)
+        if (!FocusElement(elementId, out var element) || !element!.IsVisible)
             return;
         NotifyActivity();
         var name = TextTemplates.BindingName(element);
@@ -196,7 +214,6 @@ public sealed class PlaybackEngine
             _deferredNav = DeferredNav.Enter;
             _deferredSceneId = sceneId;
             _deferredLeave = runLeave;
-            _dropActiveSequence = true;
             return;
         }
         if (_depth > 8)
@@ -206,33 +223,57 @@ public sealed class PlaybackEngine
         if (destination == null)
             return;
 
-        if (runLeave && Current != null && Current.Id != sceneId)
-            Run(Current.Interactions, TriggerKind.SceneLeave, null, null);
+        var screen = Math.Max(0, destination.Screen);
+        var leaving = SceneFor(screen);
+        if (runLeave && leaving != null && leaving.Id != sceneId)
+            Run(leaving.Interactions, TriggerKind.SceneLeave, null, null);
+
+        var retired = new HashSet<string>(StringComparer.Ordinal);
+        if (leaving != null)
+        {
+            foreach (var element in leaving.Elements)
+                retired.Add(element.Id);
+        }
+        foreach (var element in destination.Elements)
+            retired.Add(element.Id);
 
         Restore(sceneId);
-        Current = Live.Scenes.First(s => s.Id == sceneId);
-        ArmTimers(Current);
-        _sequences.Clear();
-        _tweens.Clear();
-        _effects.Clear();
-        _entrances.Clear();
-        BeginEntrances(Current);
+        destination = Live.Scenes.First(s => s.Id == sceneId);
+        _showing[screen] = sceneId;
+        _focusScreen = screen;
+        ArmTimers(destination);
+        _sequences.RemoveAll(item => item.Screen == screen);
+        DropMotion(retired);
+        BeginEntrances(destination);
         SceneJustRaised = true;
+        ScreenChanged?.Invoke(screen);
         SceneChanged?.Invoke();
 
-        if (Current?.Id != sceneId)
+        if (SceneFor(screen)?.Id != sceneId)
             return;
 
-        foreach (var element in Current.Elements.Where(e => e.Autoplay && e.Kind is ElementKind.Video or ElementKind.Audio))
+        foreach (var element in destination.Elements.Where(e => e.Autoplay && e.Kind is ElementKind.Video or ElementKind.Audio))
         {
             element.IsPlaying = true;
             MediaCommand?.Invoke(new MediaRequest(element.Id, MediaTransport.Play));
         }
 
-        Run(Current.Interactions, TriggerKind.SceneEnter, null, null);
-        if (Current?.Id == sceneId)
+        Run(destination.Interactions, TriggerKind.SceneEnter, null, null);
+        if (SceneFor(screen)?.Id == sceneId)
             Changed?.Invoke();
     }
+
+    private void DropMotion(HashSet<string> elementIds)
+    {
+        if (elementIds.Count == 0)
+            return;
+        _tweens.RemoveAll(tween => elementIds.Contains(tween.Element.Id));
+        _effects.RemoveAll(effect => elementIds.Contains(effect.Element.Id));
+        _entrances.RemoveAll(effect => elementIds.Contains(effect.Element.Id));
+    }
+
+    private IEnumerable<Scene> Showing() =>
+        _showing.Values.Select(id => Live.Scenes.FirstOrDefault(scene => scene.Id == id)).Where(scene => scene != null)!;
 
     private void Restore(string sceneId)
     {
@@ -250,6 +291,7 @@ public sealed class PlaybackEngine
         live.BackgroundY = copy.BackgroundY;
         live.BackgroundWidth = copy.BackgroundWidth;
         live.BackgroundHeight = copy.BackgroundHeight;
+        live.Backgrounds = copy.Backgrounds;
         live.Elements = copy.Elements;
         live.Interactions = copy.Interactions;
     }
@@ -266,33 +308,40 @@ public sealed class PlaybackEngine
 
     private bool FireTimers(DateTime now)
     {
-        if (Current == null)
+        if (!_showing.Any())
             return false;
         var fired = false;
-        foreach (var interaction in Enumerate(Current).Where(i => i.Trigger == TriggerKind.Timer).ToList())
+        foreach (var scene in Showing().ToList())
         {
-            if (!_timerArmed.TryGetValue(interaction.Id, out var armed))
-                continue;
-            if ((now - armed).TotalMilliseconds < interaction.TimerMs)
-                continue;
-            if (!interaction.TimerRepeat && !_timerOnce.Add(interaction.Id))
-                continue;
-            if (interaction.TimerRepeat)
-                _timerArmed[interaction.Id] = now;
-            RunActions(interaction.Actions, ContextFor(interaction));
-            fired = true;
-            if (Current == null || Current.Interactions.All(i => i.Id != interaction.Id) &&
-                Current.Elements.SelectMany(e => e.Interactions).All(i => i.Id != interaction.Id))
-                break;
+            foreach (var interaction in Enumerate(scene).Where(i => i.Trigger == TriggerKind.Timer).ToList())
+            {
+                if (!_timerArmed.TryGetValue(interaction.Id, out var armed))
+                    continue;
+                if ((now - armed).TotalMilliseconds < interaction.TimerMs)
+                    continue;
+                if (!interaction.TimerRepeat && !_timerOnce.Add(interaction.Id))
+                    continue;
+                if (interaction.TimerRepeat)
+                    _timerArmed[interaction.Id] = now;
+                RunActions(interaction.Actions, ContextFor(interaction));
+                fired = true;
+                if (Showing().All(item => item.Interactions.All(i => i.Id != interaction.Id) &&
+                        item.Elements.SelectMany(e => e.Interactions).All(i => i.Id != interaction.Id)))
+                    break;
+            }
         }
         return fired;
     }
 
     private SceneElement? ContextFor(Interaction interaction)
     {
-        if (Current == null)
-            return null;
-        return Current.Elements.FirstOrDefault(e => e.Interactions.Any(i => i.Id == interaction.Id));
+        foreach (var scene in Showing())
+        {
+            var element = scene.Elements.FirstOrDefault(e => e.Interactions.Any(i => i.Id == interaction.Id));
+            if (element != null)
+                return element;
+        }
+        return null;
     }
 
     private void Run(List<Interaction> interactions, TriggerKind trigger, SceneElement? context, string? key)
@@ -308,7 +357,7 @@ public sealed class PlaybackEngine
 
     private void RunActions(IEnumerable<ExperienceAction> actions, SceneElement? context)
     {
-        var sequence = new ActionSequence();
+        var sequence = new ActionSequence { Screen = _focusScreen };
         foreach (var action in actions)
             sequence.Actions.Add(Clone(action, context));
         _sequences.Add(sequence);
@@ -366,12 +415,8 @@ public sealed class PlaybackEngine
                 }
                 if (Apply(action))
                 {
-                    if (_dropActiveSequence)
-                    {
-                        sequence.Actions.Clear();
-                        _sequences.Remove(sequence);
-                        _dropActiveSequence = false;
-                    }
+                    sequence.Actions.Clear();
+                    _sequences.Remove(sequence);
                     return;
                 }
                 if (action.Kind == ActionKind.PlayEffect && sequence.Actions.Count > 0 && TapEffects.Known(action.Text))
@@ -467,7 +512,8 @@ public sealed class PlaybackEngine
         }
 
         var element = Find(action.TargetId);
-        if (element == null || Current == null)
+        var owner = element == null ? null : Showing().FirstOrDefault(scene => scene.Elements.Any(item => item.Id == element.Id));
+        if (element == null || owner == null)
             return;
         switch (action.Kind)
         {
@@ -497,10 +543,10 @@ public sealed class PlaybackEngine
                 TweenOrSet(element, action.DurationMs, width: action.Width, height: action.Height);
                 break;
             case ActionKind.BringToFront:
-                element.Z = Current.Elements.Max(e => e.Z) + 1;
+                element.Z = owner.Elements.Max(e => e.Z) + 1;
                 break;
             case ActionKind.SendToBack:
-                element.Z = Current.Elements.Min(e => e.Z) - 1;
+                element.Z = owner.Elements.Min(e => e.Z) - 1;
                 break;
             case ActionKind.PlayMedia:
                 element.IsPlaying = true;
@@ -678,18 +724,21 @@ public sealed class PlaybackEngine
         if (HoldNavigation())
         {
             _deferredNav = delta < 0 ? DeferredNav.Previous : DeferredNav.Next;
-            _dropActiveSequence = true;
             return;
         }
         if (Current == null || Live.Scenes.Count == 0)
             return;
-        var index = Live.Scenes.FindIndex(s => s.Id == Current.Id);
+        var screen = Math.Max(0, Current.Screen);
+        var scenes = Live.Scenes.Where(scene => Math.Max(0, scene.Screen) == screen).ToList();
+        if (scenes.Count == 0)
+            return;
+        var index = scenes.FindIndex(scene => scene.Id == Current.Id);
         if (index < 0)
             index = 0;
-        var next = (index + delta) % Live.Scenes.Count;
+        var next = (index + delta) % scenes.Count;
         if (next < 0)
-            next += Live.Scenes.Count;
-        Enter(Live.Scenes[next].Id, runLeave: true);
+            next += scenes.Count;
+        Enter(scenes[next].Id, runLeave: true);
     }
 
     private void Restart()
@@ -697,20 +746,42 @@ public sealed class PlaybackEngine
         if (HoldNavigation())
         {
             _deferredNav = DeferredNav.Restart;
-            _dropActiveSequence = true;
             return;
         }
-        var start = Original.StartSceneId ?? Original.Scenes.FirstOrDefault()?.Id;
         Live.Variables = ProjectStore.Clone(Original).Variables;
-        if (!string.IsNullOrEmpty(start))
-            Enter(start, runLeave: false);
+        _showing.Clear();
+        var screens = Live.Scenes.Select(scene => Math.Max(0, scene.Screen)).Distinct().OrderBy(screen => screen == 0 ? 1 : 0).ThenBy(screen => screen);
+        foreach (var screen in screens)
+        {
+            var start = DisplayScreens.StartId(Live, screen);
+            if (!string.IsNullOrEmpty(start))
+                Enter(start, runLeave: false);
+        }
+    }
+
+    private bool FocusElement(string elementId, out SceneElement? element)
+    {
+        element = Find(elementId);
+        if (element == null)
+            return false;
+        var found = element;
+        var owner = Showing().FirstOrDefault(scene => scene.Elements.Any(item => item.Id == found.Id));
+        if (owner != null)
+            _focusScreen = Math.Max(0, owner.Screen);
+        return true;
     }
 
     private SceneElement? Find(string? id)
     {
-        if (Current == null || string.IsNullOrEmpty(id))
+        if (string.IsNullOrEmpty(id))
             return null;
-        return Current.Elements.FirstOrDefault(e => e.Id == id);
+        foreach (var scene in Showing())
+        {
+            var element = scene.Elements.FirstOrDefault(e => e.Id == id);
+            if (element != null)
+                return element;
+        }
+        return null;
     }
 
     private static IEnumerable<Interaction> Enumerate(Scene scene) =>
@@ -729,6 +800,7 @@ public sealed class PlaybackEngine
 
     private sealed class ActionSequence
     {
+        public int Screen { get; set; }
         public List<ExperienceAction> Actions { get; } = new();
         public DateTime? WaitUntil { get; set; }
     }
