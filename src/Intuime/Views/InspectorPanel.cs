@@ -76,14 +76,30 @@ public sealed class InspectorPanel : StackPanel
                 session.TouchLive();
             });
             BuildBackgroundLayers(scene, session);
-            var start = new CheckBox { Content = "Start scene", IsChecked = session.Document.StartSceneId == scene.Id };
+            var screenNames = DisplayScreens.Names;
+            Choice("Play on", screenNames, DisplayScreens.Name(Math.Clamp(scene.Screen, 0, screenNames.Length - 1)), value =>
+            {
+                var next = DisplayScreens.IndexOf(value);
+                if (next == Math.Max(0, scene.Screen))
+                    return;
+                var wasStart = DisplayScreens.IsStart(session.Document, scene);
+                scene.Screen = next;
+                if (wasStart)
+                    session.SetScreenStart(scene);
+                else
+                    session.Commit();
+                Refresh();
+            });
+            var start = new CheckBox { Content = "Starting scene for this screen", IsChecked = DisplayScreens.IsStart(session.Document, scene) };
             start.IsCheckedChanged += (_, _) =>
             {
                 if (_building || start.IsChecked != true)
                     return;
-                session.SetStartScene(scene.Id);
+                session.SetScreenStart(scene);
+                Refresh();
             };
             Children.Add(start);
+            Note("Main screen is this computer. Extended screen is the second monitor. A button that goes to a scene plays it on the screen chosen for that scene, and the other screen stays where it is. Mark a starting scene for the extended screen so it is not empty when you press Play.");
             Heading("Experience");
             Text("Name", session.Document.Name, value =>
             {
@@ -669,7 +685,13 @@ public sealed class InspectorPanel : StackPanel
     private Control SceneChoice(ExperienceAction action)
     {
         var scenes = _session!.Document.Scenes;
-        return ChoiceControl("Scene", scenes.Select(scene => scene.Id).ToArray(), action.TargetId, id => scenes.FirstOrDefault(scene => scene.Id == id)?.Name ?? id, value =>
+        return ChoiceControl("Scene", scenes.Select(scene => scene.Id).ToArray(), action.TargetId, id =>
+        {
+            var scene = scenes.FirstOrDefault(item => item.Id == id);
+            if (scene == null)
+                return id;
+            return scene.Screen == 0 ? scene.Name : scene.Name + " · " + DisplayScreens.Name(scene.Screen);
+        }, value =>
         {
             action.TargetId = value;
             _session.TouchLive();

@@ -51,6 +51,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private Func<BackgroundLayer, bool>? _backgroundInclude;
     private Func<SceneElement, bool>? _omit;
     private string? _backgroundElementId;
+    private int? _screen;
     private bool _passThrough;
 
     public SceneSurface()
@@ -194,6 +195,8 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         _grid.IsVisible = false;
         _assetRoot = assetRoot;
     }
+
+    public void UseScreen(int screen) => _screen = screen;
 
     public void UseOverlay(double originX, double originY, double width, double height, Func<SceneElement, bool> include, string? backgroundElementId = null, Func<BackgroundLayer, bool>? backgrounds = null)
     {
@@ -810,7 +813,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                 if (!string.IsNullOrEmpty(_backgroundElementId))
                     _engine?.PointerUp(_backgroundElementId);
                 else
-                    _engine?.BackgroundTap();
+                    _engine?.BackgroundTap(Scene()?.Id);
             }
             return;
         }
@@ -1027,7 +1030,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         }
     }
 
-    private Scene? Scene() => _design ? _session?.ActiveScene : _engine?.Current;
+    private Scene? Scene() => _design ? _session?.ActiveScene : _screen is int screen ? _engine?.SceneFor(screen) : _engine?.Current;
     private ExperienceDocument? Document() => _design ? _session?.Document : _engine?.Live;
 
     private (double Width, double Height) ClipSize()

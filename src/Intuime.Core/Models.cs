@@ -71,9 +71,57 @@ public sealed class ExperienceDocument
     public int Width { get; set; } = 1920;
     public int Height { get; set; } = 1080;
     public string? StartSceneId { get; set; }
+    public List<ScreenStart> ScreenStarts { get; set; } = new();
     public List<ExperienceVariable> Variables { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
     public List<Scene> Scenes { get; set; } = new();
+}
+
+public sealed class ScreenStart
+{
+    public int Screen { get; set; }
+    public string SceneId { get; set; } = "";
+}
+
+public static class DisplayScreens
+{
+    public static readonly string[] Names = { "Main screen", "Extended screen", "Screen 3", "Screen 4", "Screen 5", "Screen 6" };
+
+    public static string Name(int screen) =>
+        screen >= 0 && screen < Names.Length ? Names[screen] : "Screen " + (screen + 1);
+
+    public static int IndexOf(string name)
+    {
+        var index = Array.IndexOf(Names, name);
+        return index < 0 ? 0 : index;
+    }
+
+    public static bool IsStart(ExperienceDocument document, Scene scene)
+    {
+        var screen = Math.Max(0, scene.Screen);
+        if (screen == 0)
+            return document.StartSceneId == scene.Id;
+        return document.ScreenStarts.Any(item => item.Screen == screen && item.SceneId == scene.Id);
+    }
+
+    public static string? StartId(ExperienceDocument document, int screen)
+    {
+        screen = Math.Max(0, screen);
+        if (screen == 0)
+        {
+            var marked = document.Scenes.FirstOrDefault(scene => scene.Id == document.StartSceneId && Math.Max(0, scene.Screen) == 0);
+            if (marked != null)
+                return marked.Id;
+        }
+        else
+        {
+            var id = document.ScreenStarts.FirstOrDefault(item => item.Screen == screen)?.SceneId;
+            var marked = document.Scenes.FirstOrDefault(scene => scene.Id == id && Math.Max(0, scene.Screen) == screen);
+            if (marked != null)
+                return marked.Id;
+        }
+        return document.Scenes.FirstOrDefault(scene => Math.Max(0, scene.Screen) == screen)?.Id;
+    }
 }
 
 public sealed class ExperienceVariable
@@ -86,6 +134,7 @@ public sealed class Scene
 {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Scene";
+    public int Screen { get; set; }
     public string Background { get; set; } = "#101820";
     public string BackgroundImage { get; set; } = "";
     public string BackgroundVideo { get; set; } = "";

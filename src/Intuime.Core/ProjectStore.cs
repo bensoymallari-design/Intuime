@@ -73,6 +73,8 @@ public static class ProjectStore
             scene.Id = Unique(scene.Id, seen);
             scene.Name = string.IsNullOrWhiteSpace(scene.Name) ? "Scene" : scene.Name;
             scene.Background = string.IsNullOrWhiteSpace(scene.Background) ? "#101820" : scene.Background;
+            if (scene.Screen < 0)
+                scene.Screen = 0;
             scene.PullLegacyBackground();
             foreach (var layer in scene.Backgrounds)
             {
@@ -98,6 +100,10 @@ public static class ProjectStore
 
         if (document.Scenes.All(s => s.Id != document.StartSceneId))
             document.StartSceneId = document.Scenes[0].Id;
+        document.ScreenStarts ??= new();
+        document.ScreenStarts.RemoveAll(item =>
+            item.Screen <= 0 ||
+            document.Scenes.All(scene => scene.Id != item.SceneId || Math.Max(0, scene.Screen) != item.Screen));
 
         document.Variables.RemoveAll(v => string.IsNullOrWhiteSpace(v.Name));
     }

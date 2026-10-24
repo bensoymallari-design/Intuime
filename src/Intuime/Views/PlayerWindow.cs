@@ -18,6 +18,9 @@ public sealed class PlayerWindow : Window
 {
     private readonly PlaybackEngine _engine;
     private readonly string _assetRoot;
+    private readonly int _screen;
+    private readonly bool _ownsClock;
+    private Screen? _monitor;
     private readonly SceneSurface _surface = new();
     private readonly LayoutTransformControl _scaler = new()
     {
@@ -43,15 +46,17 @@ public sealed class PlayerWindow : Window
     private double _fade;
     private double _hintAge;
 
-    public PlayerWindow(ExperienceDocument document, string assetRoot, bool fullscreen)
+    public PlayerWindow(PlaybackEngine engine, string assetRoot, bool fullscreen, int screen, bool ownsClock)
     {
         _assetRoot = assetRoot;
-        _engine = new PlaybackEngine(document);
-        Title = "Intuime Player — " + document.Name;
+        _engine = engine;
+        _screen = Math.Max(0, screen);
+        _ownsClock = ownsClock;
+        Title = "Intuime Player — " + engine.Live.Name + (_screen == 0 ? "" : " — " + DisplayScreens.Name(_screen));
         Background = Brushes.Black;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        Width = Math.Min(1400, document.Width);
-        Height = Math.Min(900, document.Height);
+        Width = Math.Min(1400, engine.Live.Width);
+        Height = Math.Min(900, engine.Live.Height);
         if (fullscreen)
             WindowState = WindowState.FullScreen;
         try
@@ -63,8 +68,10 @@ public sealed class PlayerWindow : Window
         }
 
         _surface.UsePlayback(_engine, assetRoot);
+        _surface.UseScreen(_screen);
         _surface.OpenUrlRequested += OpenUrl;
         _pageButtons.UsePlayback(_engine, assetRoot);
+        _pageButtons.UseScreen(_screen);
         _pageButtons.PassClicksThrough();
         _pageButtons.OpenUrlRequested += OpenUrl;
         _pageButtonsHost.LayoutTransform = _scale;
@@ -125,8 +132,10 @@ public sealed class PlayerWindow : Window
         layers.Children.Add(_status);
         Content = layers;
 
-        _engine.SceneChanged += () =>
+        _engine.ScreenChanged += changed =>
         {
+            if (changed != _screen)
+                return;
             _fade = 0;
             _status.IsVisible = false;
             _page.HidePage();
@@ -149,12 +158,12 @@ public sealed class PlayerWindow : Window
         _engine.MediaCommand += ApplyMedia;
         _engine.OpenUrlRequested += OpenUrl;
         _engine.ExitRequestedEvent += () => Close();
-        _engine.Start();
 
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += (_, _) =>
         {
-            _engine.Tick();
+            if (_ownsClock)
+                _engine.Tick();
             _fade = Math.Min(1, _fade + 0.1);
             _scaler.Opacity = _fade;
             _overlay.Opacity = _fade;
@@ -172,13 +181,23 @@ public sealed class PlayerWindow : Window
                     return;
                 }
                 if (keys.Left)
-                    _engine.KeyPressed("Left");
+                    _engine.KeyPressed("Left", _screen);
                 if (keys.Right)
-                    _engine.KeyPressed("Right");
+                    _engine.KeyPressed("Right", _screen);
             }
         };
         _timer.Start();
-        Opened += (_, _) => Focus();
+        Opened += (_, _) =>
+        {
+            if (_monitor != null)
+            {
+                Position = _monitor.Bounds.Position;
+                var scale = _monitor.Scaling <= 0 ? 1 : _monitor.Scaling;
+                Width = _monitor.Bounds.Width / scale;
+                Height = _monitor.Bounds.Height / scale;
+            }
+            Focus();
+        };
         Closed += (_, _) =>
         {
             _timer.Stop();
@@ -190,7 +209,96 @@ public sealed class PlayerWindow : Window
         PointerPressed += (_, _) => Focus();
     }
 
-    public void PressKey(string key) => _engine.KeyPressed(key);
+    public void PressKey(string key) => _engine.KeyPressed(key, _screen);
+
+    private Scene? Shown => _engine.SceneFor(_screen);
+
+    public void Place(Screen? monitor)
+    {
+        if (monitor == null)
+            return;
+        _monitor = monitor;
+        SystemDecorations = SystemDecorations.None;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        WindowState = WindowState.Normal;
+        Position = monitor.Bounds.Position;
+        var scale = monitor.Scaling <= 0 ? 1 : monitor.Scaling;
+        Width = monitor.Bounds.Width / scale;
+        Height = monitor.Bounds.Height / scale;
+    }
+
+    public void PlaceBeside(Screen primary, int index, int count, bool announceMissing)
+    {
+        var scale = primary.Scaling <= 0 ? 1 : primary.Scaling;
+        var slice = Math.Max(1, primary.Bounds.Width / Math.Max(1, count));
+        SystemDecorations = SystemDecorations.None;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        WindowState = WindowState.Normal;
+        Position = new PixelPoint(primary.Bounds.X + slice * index, primary.Bounds.Y);
+        Width = slice / scale;
+        Height = primary.Bounds.Height / scale;
+        if (announceMissing)
+            ShowStatus(DisplayScreens.Name(_screen) + " is not connected, so it is shown beside the main screen.");
+    }
+
+    public static List<PlayerWindow> Open(ExperienceDocument document, string assetRoot, bool fullscreen, Screens? screens)
+    {
+        var engine = new PlaybackEngine(document);
+        var used = document.Scenes.Select(scene => Math.Max(0, scene.Screen)).Distinct().OrderBy(screen => screen).ToList();
+        if (used.Count == 0)
+            used.Add(0);
+        var monitors = Ordered(screens);
+        var missing = used.Any(index => index >= monitors.Count);
+        var classic = fullscreen && !missing && used.Count == 1 && used[0] == 0;
+        var windows = new List<PlayerWindow>();
+        foreach (var index in used)
+            windows.Add(new PlayerWindow(engine, assetRoot, classic, index, ownsClock: windows.Count == 0));
+        engine.Start();
+        var closing = false;
+        for (var i = 0; i < windows.Count; i++)
+        {
+            var window = windows[i];
+            var index = used[i];
+            if (classic)
+            {
+                // The single main screen keeps the normal full-screen player.
+            }
+            else if (fullscreen && !missing && index < monitors.Count)
+                window.Place(monitors[index]);
+            else if (monitors.Count > 0 && (windows.Count > 1 || missing))
+                window.PlaceBeside(monitors[0], i, windows.Count, index >= monitors.Count);
+            window.Closed += (_, _) =>
+            {
+                if (closing)
+                    return;
+                closing = true;
+                foreach (var other in windows)
+                {
+                    if (other != window && other.IsVisible)
+                        other.Close();
+                }
+            };
+            window.Show();
+        }
+        if (windows.Count > 0)
+            windows[0].Activate();
+        return windows;
+    }
+
+    private static List<Screen> Ordered(Screens? screens)
+    {
+        var ordered = new List<Screen>();
+        if (screens == null)
+            return ordered;
+        if (screens.Primary != null)
+            ordered.Add(screens.Primary);
+        foreach (var screen in screens.All.OrderBy(item => item.Bounds.X).ThenBy(item => item.Bounds.Y))
+        {
+            if (!ordered.Contains(screen))
+                ordered.Add(screen);
+        }
+        return ordered;
+    }
 
     public void ToggleFullScreen() =>
         WindowState = WindowState == WindowState.FullScreen ? WindowState.Normal : WindowState.FullScreen;
@@ -219,7 +327,7 @@ public sealed class PlayerWindow : Window
     private void CreateHosts()
     {
         var vlc = MediaRuntime.Ensure();
-        var scene = _engine.Current;
+        var scene = Shown;
         if (vlc == null || scene == null)
         {
             scene?.PullLegacyBackground();
@@ -262,6 +370,7 @@ public sealed class PlayerWindow : Window
                     var videoId = element.Id;
                     host.Foreground = new SceneSurface();
                     host.Foreground.UsePlayback(_engine, _assetRoot);
+                    host.Foreground.UseScreen(_screen);
                     host.Foreground.UseOverlay(element.X, element.Y, element.Width, element.Height,
                         candidate => OverlayOwner(candidate) == videoId, videoId);
                     host.Foreground.Rebuild();
@@ -318,6 +427,7 @@ public sealed class PlayerWindow : Window
             player.EndReached += (_, _) => Dispatcher.UIThread.Post(() => OnEnded(host));
             host.Foreground = new SceneSurface();
             host.Foreground.UsePlayback(_engine, _assetRoot);
+            host.Foreground.UseScreen(_screen);
             host.Foreground.UseOverlay(box.X, box.Y, box.Width, box.Height,
                 candidate => ElementOverVideo(candidate, box),
                 null,
@@ -362,7 +472,7 @@ public sealed class PlayerWindow : Window
 
     private bool CoveredByBackdrop(SceneElement candidate)
     {
-        var scene = _engine.Current;
+        var scene = Shown;
         if (scene == null || !candidate.IsVisible || candidate.Kind == ElementKind.Video || OverlayOwner(candidate) != null)
             return false;
         return scene.Backgrounds.Any(layer => layer.Video && layer.Source.Length > 0 && FullyInside(candidate, layer.Box(_engine.Live.Width, _engine.Live.Height)));
@@ -378,7 +488,7 @@ public sealed class PlayerWindow : Window
     {
         if (!_hosts.TryGetValue(request.ElementId, out var host))
             return;
-        var element = _engine.Current?.Elements.FirstOrDefault(item => item.Id == request.ElementId);
+        var element = Shown?.Elements.FirstOrDefault(item => item.Id == request.ElementId);
         if (element == null)
             return;
         var path = ProjectStore.Resolve(_assetRoot, element.Source);
@@ -415,7 +525,7 @@ public sealed class PlayerWindow : Window
 
     private void LayoutVideos()
     {
-        var scene = _engine.Current;
+        var scene = Shown;
         if (scene == null)
             return;
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
@@ -517,7 +627,7 @@ public sealed class PlayerWindow : Window
     private List<(int X, int Y, int Width, int Height)> PageShapes()
     {
         var shapes = new List<(int X, int Y, int Width, int Height)>();
-        var scene = _engine.Current;
+        var scene = Shown;
         if (scene == null)
             return shapes;
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
@@ -710,7 +820,7 @@ public sealed class PlayerWindow : Window
             return true;
         var element = string.IsNullOrEmpty(host.ElementId)
             ? null
-            : _engine.Current?.Elements.FirstOrDefault(item => item.Id == host.ElementId);
+            : Shown?.Elements.FirstOrDefault(item => item.Id == host.ElementId);
         if (element == null || string.IsNullOrWhiteSpace(element.Source))
         {
             ShowStatus("Choose a video file first.");
@@ -799,7 +909,7 @@ public sealed class PlayerWindow : Window
 
     private string? OverlayOwner(SceneElement candidate)
     {
-        var scene = _engine.Current;
+        var scene = Shown;
         return scene == null ? null : LayoutMath.VideoOverlayOwner(scene.Elements, candidate);
     }
 
@@ -857,7 +967,7 @@ public sealed class PlayerWindow : Window
             e.Handled = true;
             return;
         }
-        _engine.KeyPressed(e.Key.ToString());
+        _engine.KeyPressed(e.Key.ToString(), _screen);
         e.Handled = true;
     }
 

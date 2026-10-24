@@ -306,6 +306,7 @@ public sealed class EditorSession
         Document.Scenes.Remove(scene);
         if (Document.StartSceneId == scene.Id)
             Document.StartSceneId = Document.Scenes[0].Id;
+        Document.ScreenStarts.RemoveAll(item => item.SceneId == scene.Id);
         ActiveScene = Document.Scenes[0];
         Selection.Clear();
         Commit(structure: true);
@@ -340,9 +341,25 @@ public sealed class EditorSession
 
     public void SetStartScene(string sceneId)
     {
-        if (Document.Scenes.All(s => s.Id != sceneId))
+        var scene = Document.Scenes.FirstOrDefault(s => s.Id == sceneId);
+        if (scene == null)
             return;
-        Document.StartSceneId = sceneId;
+        SetScreenStart(scene);
+    }
+
+    public void SetScreenStart(Scene scene)
+    {
+        var screen = Math.Max(0, scene.Screen);
+        Document.ScreenStarts.RemoveAll(item => item.Screen == screen || item.SceneId == scene.Id);
+        if (screen == 0)
+            Document.StartSceneId = scene.Id;
+        else
+        {
+            Document.ScreenStarts.Add(new ScreenStart { Screen = screen, SceneId = scene.Id });
+            if (Document.StartSceneId == scene.Id)
+                Document.StartSceneId = Document.Scenes.FirstOrDefault(item => item.Id != scene.Id && Math.Max(0, item.Screen) == 0)?.Id
+                    ?? Document.Scenes.FirstOrDefault(item => item.Id != scene.Id)?.Id;
+        }
         Commit(structure: true);
     }
 
