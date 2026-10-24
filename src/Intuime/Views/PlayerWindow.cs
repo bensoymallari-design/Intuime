@@ -20,6 +20,7 @@ public sealed class PlayerWindow : Window
     private readonly string _assetRoot;
     private readonly int _screen;
     private readonly bool _ownsClock;
+    private readonly OscLink? _osc;
     private Screen? _monitor;
     private readonly SceneSurface _surface = new();
     private readonly LayoutTransformControl _scaler = new()
@@ -198,9 +199,11 @@ public sealed class PlayerWindow : Window
             }
             Focus();
         };
+        _osc = _ownsClock ? new OscLink(_engine, _engine.Live) : null;
         Closed += (_, _) =>
         {
             _timer.Stop();
+            _osc?.Dispose();
             if (_buttonsWindow != null)
                 _buttonsWindow.Close();
             DisposeHosts();
@@ -210,6 +213,12 @@ public sealed class PlayerWindow : Window
     }
 
     public void PressKey(string key) => _engine.KeyPressed(key, _screen);
+
+    public void ShowOscProblem()
+    {
+        if (!string.IsNullOrWhiteSpace(_osc?.Problem))
+            ShowStatus(_osc.Problem);
+    }
 
     private Scene? Shown => _engine.SceneFor(_screen);
 
@@ -267,6 +276,7 @@ public sealed class PlayerWindow : Window
                 window.Place(monitors[index]);
             else if (monitors.Count > 0 && (windows.Count > 1 || missing))
                 window.PlaceBeside(monitors[0], i, windows.Count, index >= monitors.Count);
+            window.ShowOscProblem();
             window.Closed += (_, _) =>
             {
                 if (closing)

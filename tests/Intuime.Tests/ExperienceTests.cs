@@ -877,4 +877,98 @@ public class ExperienceTests
         Assert.Equal("loop", session.Document.StartSceneId);
         Assert.DoesNotContain(session.Document.ScreenStarts, item => item.SceneId == "loop");
     }
+
+    [Fact]
+    public void Osc_address_triggers_a_button_and_a_tap_sends_it_on()
+    {
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.Id = "go";
+        button.Text = "Go";
+        button.OscAddress = "begin";
+        button.Interactions.Add(new Interaction
+        {
+            Trigger = TriggerKind.Tap,
+            Actions = { new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = "next" } }
+        });
+        var title = ElementFactory.Create(ElementKind.Text, 0, 0, 0, 1);
+        title.Id = "title";
+        title.Text = "Hello";
+        title.OscAddress = "/title";
+        var counter = ElementFactory.Create(ElementKind.Counter, 0, 40, 0, 1);
+        counter.Id = "count";
+        counter.VariableBinding = "partySize";
+        counter.OscAddress = "/count";
+        var home = new Scene
+        {
+            Id = "home",
+            Name = "Home",
+            OscAddress = "/scene/home",
+            Elements = { button, title, counter }
+        };
+        var next = new Scene { Id = "next", Name = "Next", OscAddress = "/scene/next" };
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "home",
+            OscListenPort = 8000,
+            OscSendHost = "127.0.0.1",
+            OscSendPort = 9000,
+            Variables = { new ExperienceVariable { Name = "partySize", Value = "1" } },
+            Scenes = { home, next }
+        };
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(document));
+        Assert.Equal("/begin", OscAddresses.Canonical(loaded.Scenes[0].Elements[0].OscAddress));
+        Assert.Equal(8000, loaded.OscListenPort);
+        Assert.Equal(9000, loaded.OscSendPort);
+
+        var sent = new List<OscMessage>();
+        var engine = new PlaybackEngine(loaded);
+        engine.OscSend += sent.Add;
+        engine.Start();
+        Assert.Equal("/scene/home", sent.Single().Address);
+        Assert.Equal(1, sent.Single().Number);
+        sent.Clear();
+
+        var packet = OscCodec.Encode(new OscMessage { Address = "/begin", Number = 1 });
+        var decoded = Assert.Single(OscCodec.Decode(packet));
+        Assert.Equal("/begin", decoded.Address);
+        Assert.Equal(1, decoded.Number);
+        engine.ReceiveOsc(decoded);
+        Assert.Equal("next", engine.Current!.Id);
+        Assert.Empty(sent);
+
+        engine.ReceiveOsc(new OscMessage { Address = "/scene/home", Number = 0 });
+        Assert.Equal("next", engine.Current.Id);
+        engine.ReceiveOsc(new OscMessage { Address = "scene/home" });
+        Assert.Equal("home", engine.Current.Id);
+        sent.Clear();
+
+        engine.PointerUp("go");
+        Assert.Equal("next", engine.Current.Id);
+        Assert.Contains(sent, item => item.Address == "/begin" && item.Number == 1);
+        Assert.Contains(sent, item => item.Address == "/scene/next" && item.Number == 1);
+
+        engine.ReceiveOsc(new OscMessage { Address = "/scene/home" });
+        engine.ReceiveOsc(new OscMessage { Address = "/title", Text = "From the controller" });
+        Assert.Equal("From the controller", engine.Current!.Elements.Single(element => element.Id == "title").Text);
+        engine.ReceiveOsc(new OscMessage { Address = "/count", Number = 4, Integer = true });
+        Assert.Equal("4", TextTemplates.Get(engine.Live, "partySize"));
+
+        var bundled = new List<byte>();
+        bundled.AddRange(System.Text.Encoding.ASCII.GetBytes("#bundle\0"));
+        bundled.AddRange(new byte[8]);
+        var inner = OscCodec.Encode(new OscMessage { Address = "/scene/next", Number = 1 });
+        bundled.Add((byte)(inner.Length >> 24));
+        bundled.Add((byte)(inner.Length >> 16));
+        bundled.Add((byte)(inner.Length >> 8));
+        bundled.Add((byte)inner.Length);
+        bundled.AddRange(inner);
+        var fromBundle = Assert.Single(OscCodec.Decode(bundled.ToArray()));
+        Assert.Equal("/scene/next", fromBundle.Address);
+
+        sent.Clear();
+        engine.RunExternal(new ExperienceAction { Kind = ActionKind.SendOsc, Text = "/lights/{{partySize}}", VariableValue = "{{partySize}}" });
+        Assert.Equal("/lights/4", sent.Single().Address);
+        Assert.Equal(4, sent.Single().Number);
+        Assert.True(sent.Single().Integer);
+    }
 }

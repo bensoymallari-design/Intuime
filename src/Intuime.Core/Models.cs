@@ -54,7 +54,8 @@ public enum ActionKind
     Wait,
     RestartExperience,
     ExitPlayer,
-    PlayEffect
+    PlayEffect,
+    SendOsc
 }
 
 public enum MediaTransport
@@ -72,6 +73,9 @@ public sealed class ExperienceDocument
     public int Height { get; set; } = 1080;
     public string? StartSceneId { get; set; }
     public List<ScreenStart> ScreenStarts { get; set; } = new();
+    public int OscListenPort { get; set; } = 8000;
+    public string OscSendHost { get; set; } = "127.0.0.1";
+    public int OscSendPort { get; set; } = 9000;
     public List<ExperienceVariable> Variables { get; set; } = new();
     public List<Interaction> Interactions { get; set; } = new();
     public List<Scene> Scenes { get; set; } = new();
@@ -135,6 +139,7 @@ public sealed class Scene
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Scene";
     public int Screen { get; set; }
+    public string OscAddress { get; set; } = "";
     public string Background { get; set; } = "#101820";
     public string BackgroundImage { get; set; } = "";
     public string BackgroundVideo { get; set; } = "";
@@ -307,6 +312,7 @@ public sealed class SceneElement
     public string Entrance { get; set; } = "";
     public int EntranceDelayMs { get; set; }
     public int EntranceMs { get; set; } = EntranceEffects.DefaultDurationMs;
+    public string OscAddress { get; set; } = "";
     public List<Interaction> Interactions { get; set; } = new();
 
     [JsonIgnore]
@@ -433,6 +439,7 @@ public static class Labels
         ActionKind.RestartExperience => "Restart experience",
         ActionKind.ExitPlayer => "Exit player",
         ActionKind.PlayEffect => "Play effect",
+        ActionKind.SendOsc => "Send OSC",
         _ => kind.ToString()
     };
 

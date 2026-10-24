@@ -106,6 +106,9 @@ public static class ProjectStore
             document.Scenes.All(scene => scene.Id != item.SceneId || Math.Max(0, scene.Screen) != item.Screen));
 
         document.Variables.RemoveAll(v => string.IsNullOrWhiteSpace(v.Name));
+        document.OscListenPort = Math.Clamp(document.OscListenPort, 0, 65535);
+        document.OscSendPort = Math.Clamp(document.OscSendPort, 0, 65535);
+        document.OscSendHost = string.IsNullOrWhiteSpace(document.OscSendHost) ? "127.0.0.1" : document.OscSendHost.Trim();
     }
 
     public static IEnumerable<string> EnumerateAssets(ExperienceDocument document)
