@@ -1024,4 +1024,36 @@ public class ExperienceTests
         Assert.Equal("", loaded.Backgrounds.Single().BuiltIn);
         Assert.Equal("assets/a.png", loaded.Backgrounds.Single().Source);
     }
+
+    [Fact]
+    public void Built_in_icons_cover_media_smiles_and_flags()
+    {
+        Assert.Equal(new[] { "Media", "Smiles", "Flags", "Arrows", "Symbols", "Objects" }, BuiltInIcons.Categories());
+        Assert.Contains(BuiltInIcons.In("Media"), icon => icon.Id == "media/play");
+        Assert.Contains(BuiltInIcons.In("Media"), icon => icon.Id == "media/stop");
+        Assert.Contains(BuiltInIcons.In("Media"), icon => icon.Id == "media/next");
+        Assert.True(BuiltInIcons.In("Smiles").Length >= 8);
+        Assert.True(BuiltInIcons.In("Flags").Length >= 20);
+        var ids = BuiltInIcons.All.Select(icon => icon.Id).ToArray();
+        Assert.Equal(ids.Length, ids.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(BuiltInIcons.In("Flags"), icon => Assert.False(string.IsNullOrWhiteSpace(icon.Spec)));
+        Assert.All(BuiltInIcons.All.Where(icon => icon.Category != "Flags"), icon => Assert.Equal("", icon.Spec));
+        Assert.Equal("media/play", BuiltInIcons.Canonical("Media/Play"));
+
+        var scene = new Scene { Id = "room", Name = "Room" };
+        var element = ElementFactory.Create(ElementKind.Icon, 10, 20, 1, 1);
+        var play = BuiltInIcons.Find("media/play")!;
+        BuiltInIcons.Style(element, play);
+        element.Name = play.Name;
+        scene.Elements.Add(element);
+        var saved = Assert.Single(ProjectStore.Clone(new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } }).Scenes.Single().Elements);
+        Assert.Equal(ElementKind.Icon, saved.Kind);
+        Assert.Equal("media/play", saved.Icon);
+        Assert.Equal("Play", saved.Name);
+        Assert.True(ElementFactory.CapturesPointer(saved));
+
+        saved.Icon = "missing/icon";
+        var repaired = ProjectStore.Clone(new ExperienceDocument { Scenes = { new Scene { Id = "room", Elements = { saved } } } }).Scenes.Single();
+        Assert.Equal(BuiltInIcons.DefaultId, repaired.Elements.Single().Icon);
+    }
 }

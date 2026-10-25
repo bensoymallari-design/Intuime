@@ -494,6 +494,20 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                 return DataListBody(element);
             case ElementKind.Counter:
                 return CounterBody(node, element);
+            case ElementKind.Icon:
+                var face = new IconFace
+                {
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    IsHitTestVisible = false
+                };
+                node.RefreshText = () =>
+                {
+                    var live = Lookup(element.Id) ?? element;
+                    face.Set(live.Icon, live.Foreground);
+                };
+                node.RefreshText();
+                return face;
             case ElementKind.Video:
             case ElementKind.Audio:
                 var media = new StackPanel { Spacing = 4, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(16, 8) };

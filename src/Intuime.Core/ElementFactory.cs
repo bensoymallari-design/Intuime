@@ -140,6 +140,11 @@ public static class ElementFactory
                 element.Max = 10;
                 element.HasRange = true;
                 break;
+            case ElementKind.Icon:
+                var icon = BuiltInIcons.Find(BuiltInIcons.DefaultId)!;
+                element.Name = $"Icon {index}";
+                BuiltInIcons.Style(element, icon);
+                break;
         }
 
         return element;
@@ -148,7 +153,8 @@ public static class ElementFactory
     public static bool CapturesPointer(SceneElement element)
     {
         if (element.Kind is ElementKind.Button or ElementKind.Hotspot or ElementKind.WebLink
-            or ElementKind.DataList or ElementKind.Counter or ElementKind.Video or ElementKind.Audio)
+            or ElementKind.DataList or ElementKind.Counter or ElementKind.Video or ElementKind.Audio
+            or ElementKind.Icon)
             return true;
         if (!string.IsNullOrWhiteSpace(element.Url))
             return true;

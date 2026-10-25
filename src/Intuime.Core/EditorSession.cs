@@ -117,6 +117,21 @@ public sealed class EditorSession
         return element;
     }
 
+    public SceneElement AddIcon(string id)
+    {
+        var scene = RequireScene();
+        var icon = BuiltInIcons.Find(id) ?? BuiltInIcons.Find(BuiltInIcons.DefaultId)!;
+        var index = scene.Elements.Count(element => element.Kind == ElementKind.Icon) + 1;
+        var stagger = scene.Elements.Count % 6;
+        var element = ElementFactory.Create(ElementKind.Icon, 80 + stagger * 28, 80 + stagger * 28, NextZ(scene), index);
+        BuiltInIcons.Style(element, icon);
+        element.Name = UniqueName(scene, icon.Name);
+        scene.Elements.Add(element);
+        SelectOnly(element);
+        Commit(structure: true);
+        return element;
+    }
+
     public SceneElement AddElement(SceneElement element)
     {
         var scene = RequireScene();

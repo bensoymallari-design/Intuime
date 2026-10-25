@@ -146,6 +146,8 @@ public sealed class InspectorPanel : StackPanel
             Check("Italic", element.Italic, value => element.Italic = value);
             Choice("Align", new[] { "Left", "Center", "Right" }, element.TextAlign, value => element.TextAlign = value);
         }
+        if (element.Kind == ElementKind.Icon)
+            BuildIconChoice(element, session);
         if (element.Kind == ElementKind.Image)
             Choice("Fit", new[] { "Uniform", "UniformToFill", "Fill" }, element.Stretch, value => element.Stretch = value);
         if (element.Kind is ElementKind.Image or ElementKind.Video or ElementKind.Audio)
@@ -191,6 +193,32 @@ public sealed class InspectorPanel : StackPanel
         Heading("OSC");
         Text("OSC address", element.OscAddress, value => element.OscAddress = value.Trim());
         Note("Example: /begin. A controller that sends /begin does the same as a tap while this scene is on screen. A person tapping it sends /begin to the other device. A number of 0 does not tap. A word sent to text replaces the words.");
+    }
+
+    private void BuildIconChoice(SceneElement element, EditorSession session)
+    {
+        var icon = BuiltInIcons.Find(element.Icon) ?? BuiltInIcons.Find(BuiltInIcons.DefaultId)!;
+        Children.Add(ChoiceControl("Icon group", BuiltInIcons.Categories(), icon.Category, value => value, value =>
+        {
+            var next = BuiltInIcons.In(value).FirstOrDefault() ?? icon;
+            UseIcon(icon, next);
+        }));
+        Children.Add(ChoiceControl("Icon", BuiltInIcons.In(icon.Category), icon, item => item.Name, item => UseIcon(icon, item)));
+        if (icon.Category is not "Flags" and not "Smiles")
+            ColorField("Icon color", element.Foreground, value => element.Foreground = value);
+        Note("This icon is built in, so you do not download a picture. Pick a group, then the icon. Media has play, stop, and next. Smiles and flags bring their own colors. In Interactions, add a tap when you want the icon to open another scene.");
+
+        void UseIcon(BuiltInIcon previous, BuiltInIcon next)
+        {
+            if (element.Name == previous.Name)
+                element.Name = next.Name;
+            if (BuiltInIcons.Family(previous) != BuiltInIcons.Family(next))
+                BuiltInIcons.Style(element, next);
+            else
+                element.Icon = next.Id;
+            session.Commit(structure: true);
+            Refresh();
+        }
     }
 
     private Control TapEffectPin(SceneElement element)
