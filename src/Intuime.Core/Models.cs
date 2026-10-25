@@ -15,7 +15,8 @@ public enum ElementKind
     Video,
     Audio,
     DataList,
-    Counter
+    Counter,
+    Icon
 }
 
 public enum TriggerKind
@@ -316,6 +317,7 @@ public sealed class SceneElement
     public string TextAlign { get; set; } = "Left";
     public string VerticalAlign { get; set; } = "Center";
     public string Source { get; set; } = "";
+    public string Icon { get; set; } = "";
     public string Url { get; set; } = "";
     public string Stretch { get; set; } = "Uniform";
     public string ClockFormat { get; set; } = "HH:mm";
@@ -468,6 +470,7 @@ public static class Labels
     {
         ElementKind.WebLink => "Web link",
         ElementKind.DataList => "Data list",
+        ElementKind.Icon => "Icon",
         _ => kind.ToString()
     };
 }

@@ -133,6 +133,7 @@ public partial class ComposerWindow : Window
             var kind = item.Kind;
             flyout.Items.Add(InsertDesigns.KindMenu(kind, item.Label, preset => _session.AddElement(kind, preset)));
         }
+        flyout.Items.Add(InsertDesigns.IconMenu(id => _session.AddIcon(id)));
         button.Flyout = flyout;
         MenuHost.Children.Add(button);
     }
@@ -187,6 +188,17 @@ public partial class ComposerWindow : Window
 
     private void BuildInsert()
     {
+        var icons = new Button
+        {
+            Content = "Icons",
+            Classes = { "tool" },
+            Margin = new Avalonia.Thickness(0, 0, 6, 6),
+            Width = 124
+        };
+        ToolTip.SetTip(icons, "Play, smiles, flags, and more. Hover to choose. No picture file needed.");
+        icons.Click += (_, _) => _session.AddIcon(BuiltInIcons.DefaultId);
+        InsertDesigns.ShowIcons(icons, id => _session.AddIcon(id));
+        InsertPanel.Children.Add(icons);
         foreach (var item in ElementFactory.Catalog)
         {
             var button = new Button

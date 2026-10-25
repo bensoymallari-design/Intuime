@@ -93,6 +93,12 @@ public static class ProjectStore
             {
                 element.Id = Unique(element.Id, seen);
                 element.Name = string.IsNullOrWhiteSpace(element.Name) ? element.Kind.ToString() : element.Name;
+                if (element.Kind == ElementKind.Icon)
+                {
+                    element.Icon = BuiltInIcons.Canonical(element.Icon);
+                    if (element.Icon.Length == 0)
+                        element.Icon = BuiltInIcons.DefaultId;
+                }
                 element.Opacity = Math.Clamp(element.Opacity, 0, 1);
                 if (element.Width < 8) element.Width = 8;
                 if (element.Height < 8) element.Height = 8;
