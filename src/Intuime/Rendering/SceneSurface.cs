@@ -304,7 +304,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         {
             var layer = scene.Backgrounds[index];
             var box = layer.Box(size.Width, size.Height);
-            signature += $"|{index}:{layer.Id}:{layer.Source}:{layer.Video}:{layer.HasCustomSize}:{box.X}:{box.Y}:{box.Width}:{box.Height}";
+            signature += $"|{index}:{layer.Id}:{layer.BuiltIn}:{layer.Source}:{layer.Video}:{layer.HasCustomSize}:{box.X}:{box.Y}:{box.Width}:{box.Height}";
         }
         if (signature == _backgroundSignature)
             return;
@@ -313,12 +313,26 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         for (var index = 0; index < scene.Backgrounds.Count; index++)
         {
             var layer = scene.Backgrounds[index];
-            var drawImage = !layer.Video && (_backgroundInclude != null ? _backgroundInclude(layer) : !_clearPage);
+            var included = _backgroundInclude != null ? _backgroundInclude(layer) : !_clearPage;
+            var drawImage = !layer.Video && !layer.IsBuiltIn && included;
+            var drawMotion = layer.IsBuiltIn && included;
             var drawFrame = _design && _backgroundInclude == null && !_clearPage
                 && (layer.Video || layer.HasCustomSize || scene.Backgrounds.Count > 1);
-            if (!drawImage && !drawFrame)
+            if (!drawImage && !drawMotion && !drawFrame)
                 continue;
             var box = layer.Box(size.Width, size.Height);
+            if (drawMotion)
+            {
+                var motion = new BuiltInBackdrop(layer.BuiltIn)
+                {
+                    IsHitTestVisible = false,
+                    Width = Math.Max(1, box.Width),
+                    Height = Math.Max(1, box.Height)
+                };
+                Canvas.SetLeft(motion, box.X - _originX);
+                Canvas.SetTop(motion, box.Y - _originY);
+                _background.Children.Add(motion);
+            }
             if (drawImage)
             {
                 var image = new Image
@@ -335,7 +349,9 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             }
             if (!drawFrame)
                 continue;
-            var file = string.IsNullOrWhiteSpace(layer.Source) ? layer.Name : System.IO.Path.GetFileName(layer.Source);
+            var file = layer.IsBuiltIn
+                ? BuiltInBackgrounds.Find(layer.BuiltIn)?.Name ?? layer.Name
+                : string.IsNullOrWhiteSpace(layer.Source) ? layer.Name : System.IO.Path.GetFileName(layer.Source);
             var label = "Layer " + (index + 1) + (layer.Video ? "  ·  " + file + "  ·  press Play" : "  ·  " + file);
             var frame = new Border
             {

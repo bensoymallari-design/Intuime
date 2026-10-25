@@ -210,6 +210,7 @@ public sealed class BackgroundLayer
     public string Id { get; set; } = "";
     public string Name { get; set; } = "Picture";
     public string Source { get; set; } = "";
+    public string BuiltIn { get; set; } = "";
     public bool Video { get; set; }
     public bool Loop { get; set; } = true;
     public bool Sound { get; set; }
@@ -218,6 +219,9 @@ public sealed class BackgroundLayer
     public double Y { get; set; }
     public double Width { get; set; }
     public double Height { get; set; }
+
+    [JsonIgnore]
+    public bool IsBuiltIn => BuiltInBackgrounds.Known(BuiltIn);
 
     [JsonIgnore]
     public bool HasCustomSize => !Fill && Width >= 8 && Height >= 8;
@@ -247,6 +251,23 @@ public static class BackgroundLayers
             Name = video ? "Video" : "Picture",
             Source = source,
             Video = video,
+            Loop = true,
+            Fill = true
+        };
+        scene.Backgrounds.Add(layer);
+        return layer;
+    }
+
+    public static BackgroundLayer AddBuiltIn(Scene scene, string id)
+    {
+        scene.PullLegacyBackground();
+        var design = BuiltInBackgrounds.Find(id) ?? BuiltInBackgrounds.Find(BuiltInBackgrounds.DefaultId)!;
+        var layer = new BackgroundLayer
+        {
+            Id = Ids.New(),
+            Name = design.Name,
+            BuiltIn = design.Id,
+            Video = false,
             Loop = true,
             Fill = true
         };

@@ -971,4 +971,57 @@ public class ExperienceTests
         Assert.Equal(4, sent.Single().Number);
         Assert.True(sent.Single().Integer);
     }
+
+    [Fact]
+    public void Built_in_background_is_a_known_looping_design()
+    {
+        Assert.Equal(0, BuiltInBackgrounds.Phase(0, 8));
+        Assert.Equal(0, BuiltInBackgrounds.Phase(8, 8));
+        Assert.Equal(0, Math.Sin(Math.Tau * BuiltInBackgrounds.Phase(0, 8)), 6);
+        Assert.Equal(Math.Sin(Math.Tau * BuiltInBackgrounds.Phase(0, 8)), Math.Sin(Math.Tau * BuiltInBackgrounds.Phase(8, 8)), 6);
+
+        var ids = BuiltInBackgrounds.All.Select(item => item.Id).ToArray();
+        Assert.Equal(ids.Length, ids.Distinct(StringComparer.Ordinal).Count());
+        foreach (var category in new[] { "Futuristic", "Space", "Buildings", "Zodiac", "2D", "Nature", "Light" })
+            Assert.True(BuiltInBackgrounds.In(category).Length >= 3);
+        Assert.Equal(BuiltInBackgrounds.Categories(), new[] { "Futuristic", "Space", "Buildings", "Zodiac", "2D", "Nature", "Light" });
+        Assert.Equal("futuristic/neon-grid", BuiltInBackgrounds.Canonical("Futuristic/Neon-Grid"));
+        Assert.Equal("", BuiltInBackgrounds.Canonical("missing/nope"));
+
+        var scene = new Scene { Id = "room", Name = "Room" };
+        var layer = BackgroundLayers.AddBuiltIn(scene, "space/starfield");
+        Assert.Equal("space/starfield", layer.BuiltIn);
+        Assert.Equal("Starfield", layer.Name);
+        Assert.False(layer.Video);
+        Assert.True(layer.IsBuiltIn);
+        Assert.True(layer.Fill);
+
+        var clone = ProjectStore.Clone(new ExperienceDocument { StartSceneId = scene.Id, Scenes = { scene } }).Scenes.Single();
+        var saved = Assert.Single(clone.Backgrounds);
+        Assert.Equal("space/starfield", saved.BuiltIn);
+        Assert.Equal("Starfield", saved.Name);
+        Assert.False(saved.Video);
+
+        saved.BuiltIn = "missing/nope";
+        var repaired = ProjectStore.Clone(new ExperienceDocument { Scenes = { clone } }).Scenes.Single();
+        Assert.Equal("", repaired.Backgrounds.Single().BuiltIn);
+        Assert.False(repaired.Backgrounds.Single().IsBuiltIn);
+
+        var old = """
+        {
+          "name": "Old",
+          "width": 800,
+          "height": 600,
+          "startSceneId": "s",
+          "scenes": [{
+            "id": "s",
+            "name": "Room",
+            "backgrounds": [{ "id": "b", "name": "Picture", "source": "assets/a.png", "video": false }]
+          }]
+        }
+        """;
+        var loaded = ProjectStore.Deserialize(old).Scenes.Single();
+        Assert.Equal("", loaded.Backgrounds.Single().BuiltIn);
+        Assert.Equal("assets/a.png", loaded.Backgrounds.Single().Source);
+    }
 }

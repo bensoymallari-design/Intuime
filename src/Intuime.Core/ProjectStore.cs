@@ -79,7 +79,13 @@ public static class ProjectStore
             foreach (var layer in scene.Backgrounds)
             {
                 layer.Id = Unique(layer.Id, seen);
-                layer.Name = string.IsNullOrWhiteSpace(layer.Name) ? (layer.Video ? "Video" : "Picture") : layer.Name;
+                layer.BuiltIn = BuiltInBackgrounds.Canonical(layer.BuiltIn);
+                if (layer.BuiltIn.Length > 0)
+                    layer.Video = false;
+                if (string.IsNullOrWhiteSpace(layer.Name))
+                    layer.Name = layer.BuiltIn.Length > 0
+                        ? BuiltInBackgrounds.Find(layer.BuiltIn)!.Name
+                        : layer.Video ? "Video" : "Picture";
             }
             foreach (var interaction in scene.Interactions)
                 Repair(interaction, seen);
