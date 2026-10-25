@@ -26,9 +26,11 @@ The gallery sample opens on first launch. Tap through it with Preview, or press 
 powershell -ExecutionPolicy Bypass -File .\install-windows.ps1
 ```
 
-3. Start `publish\win-x64\Intuime.exe`.
+3. Double-click `publish\Intuime-Setup.exe`.
 
-That publish is self-contained, so the machine that runs the exe does not need the SDK. Video and audio are included through LibVLC (LGPL). See `THIRD-PARTY-NOTICES.txt`.
+That installer puts Intuime on the Start menu and the desktop. The icon is the orange Intuime mark, on the setup file, on `Intuime.exe`, and on the shortcuts. The installed app does not need the SDK. Video and audio are included through LibVLC (LGPL). See `THIRD-PARTY-NOTICES.txt`.
+
+The script also leaves the unpacked app at `publish\win-x64\Intuime.exe` if you want to copy that folder without running the installer. The first run installs Inno Setup 6 when it is missing, because that is what builds the setup exe.
 
 To work on the source instead of publishing:
 

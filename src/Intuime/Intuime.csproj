@@ -7,6 +7,11 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>Intuime</RootNamespace>
     <AssemblyName>Intuime</AssemblyName>
+    <Version>1.0.0</Version>
+    <Product>Intuime</Product>
+    <Company>Intuime</Company>
+    <Description>Touchscreen experience composer and player</Description>
+    <ApplicationIcon>Assets\intuime.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
   </PropertyGroup>
 
@@ -26,7 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <AvaloniaResource Include="Assets\**" />
+    <AvaloniaResource Include="Assets\**" Exclude="Assets\intuime.ico" />
     <Content Include="..\..\samples\lumen-gallery\assets\**\*">
       <Link>samples\lumen-gallery\assets\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
