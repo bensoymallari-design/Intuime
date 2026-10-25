@@ -19,6 +19,7 @@ public sealed class PlaybackEngine
     private bool _deferredLeave;
     private readonly Dictionary<int, string> _showing = new();
     private int _focusScreen;
+    private bool _suppressOscEcho;
 
     public PlaybackEngine(ExperienceDocument original, Func<DateTime>? clock = null)
     {
@@ -44,6 +45,7 @@ public sealed class PlaybackEngine
     public event Action<string>? OpenUrlRequested;
     public event Action? ExitRequestedEvent;
     public event Action<MediaRequest>? MediaCommand;
+    public event Action<OscMessage>? OscSend;
 
     public void Start()
     {
@@ -116,7 +118,54 @@ public sealed class PlaybackEngine
         Changed?.Invoke();
     }
 
-    public void PointerUp(string elementId)
+    public void PointerUp(string elementId) => PointerUp(elementId, fromOsc: false);
+
+    public void ReceiveOsc(OscMessage message)
+    {
+        var address = OscAddresses.Canonical(message.Address);
+        if (address.Length <= 1)
+            return;
+        var released = message.Text == null && message.Number is <= 0;
+        var elementIds = Showing()
+            .SelectMany(scene => scene.Elements)
+            .Where(element => element.IsVisible && OscAddresses.Same(element.OscAddress, address))
+            .Select(element => element.Id)
+            .ToList();
+        var sceneIds = Live.Scenes
+            .Where(scene => OscAddresses.Same(scene.OscAddress, address))
+            .Select(scene => scene.Id)
+            .ToList();
+        if (elementIds.Count == 0 && sceneIds.Count == 0)
+            return;
+
+        _suppressOscEcho = true;
+        try
+        {
+            foreach (var id in elementIds)
+            {
+                var element = Find(id);
+                if (element == null || !element.IsVisible)
+                    continue;
+                if (message.Text != null && element.Kind is ElementKind.Text or ElementKind.Button)
+                    element.Text = message.Text;
+                if (message.Number != null && element.Kind == ElementKind.Counter)
+                    SetCounter(element, message.Number.Value);
+                if (!released)
+                    PointerUp(id, fromOsc: true);
+            }
+            if (!released)
+            {
+                foreach (var id in sceneIds)
+                    Enter(id, runLeave: true);
+            }
+        }
+        finally
+        {
+            _suppressOscEcho = false;
+        }
+    }
+
+    private void PointerUp(string elementId, bool fromOsc)
     {
         if (!FocusElement(elementId, out var element) || !element!.IsVisible)
             return;
@@ -142,6 +191,8 @@ public sealed class PlaybackEngine
             if (holdNavigation)
                 _deferDepth--;
         }
+        if (!fromOsc)
+            EmitOsc(element.OscAddress, number: 1, automatic: true);
         Changed?.Invoke();
     }
 
@@ -260,7 +311,10 @@ public sealed class PlaybackEngine
 
         Run(destination.Interactions, TriggerKind.SceneEnter, null, null);
         if (SceneFor(screen)?.Id == sceneId)
+        {
             Changed?.Invoke();
+            EmitOsc(destination.OscAddress, number: 1, automatic: true);
+        }
     }
 
     private void DropMotion(HashSet<string> elementIds)
@@ -292,6 +346,7 @@ public sealed class PlaybackEngine
         live.BackgroundWidth = copy.BackgroundWidth;
         live.BackgroundHeight = copy.BackgroundHeight;
         live.Backgrounds = copy.Backgrounds;
+        live.OscAddress = copy.OscAddress;
         live.Elements = copy.Elements;
         live.Interactions = copy.Interactions;
     }
@@ -465,6 +520,9 @@ public sealed class PlaybackEngine
             case ActionKind.OpenUrl:
                 if (!string.IsNullOrWhiteSpace(action.Text))
                     OpenUrlRequested?.Invoke(TextTemplates.Expand(action.Text, Live));
+                return false;
+            case ActionKind.SendOsc:
+                SendOsc(action);
                 return false;
             case ActionKind.SetBackground:
                 if (Current != null)
@@ -757,6 +815,37 @@ public sealed class PlaybackEngine
             if (!string.IsNullOrEmpty(start))
                 Enter(start, runLeave: false);
         }
+    }
+
+    private void SendOsc(ExperienceAction action)
+    {
+        var address = TextTemplates.Expand(action.Text, Live);
+        var value = TextTemplates.Expand(action.VariableValue, Live);
+        OscCodec.TryArgument(value, out var message, address);
+        EmitOsc(message.Address, message.Number, message.Text, message.Integer, automatic: false);
+    }
+
+    private void SetCounter(SceneElement element, double next)
+    {
+        if (element.HasRange)
+            next = Math.Clamp(next, Math.Min(element.Min, element.Max), Math.Max(element.Min, element.Max));
+        TextTemplates.Set(Live, TextTemplates.BindingName(element), TextTemplates.FormatNumber(next));
+    }
+
+    private void EmitOsc(string? address, double? number = null, string? text = null, bool integer = false, bool automatic = false)
+    {
+        if (automatic && _suppressOscEcho)
+            return;
+        var canonical = OscAddresses.Canonical(address);
+        if (canonical.Length <= 1)
+            return;
+        OscSend?.Invoke(new OscMessage
+        {
+            Address = canonical,
+            Number = text == null ? number : null,
+            Text = text,
+            Integer = integer
+        });
     }
 
     private bool FocusElement(string elementId, out SceneElement? element)

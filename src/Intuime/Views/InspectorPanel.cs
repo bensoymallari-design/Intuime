@@ -100,6 +100,9 @@ public sealed class InspectorPanel : StackPanel
             };
             Children.Add(start);
             Note("Main screen is this computer. Extended screen is the second monitor. A button that goes to a scene plays it on the screen chosen for that scene, and the other screen stays where it is. Mark a starting scene for the extended screen so it is not empty when you press Play.");
+            Heading("OSC");
+            Text("This scene's OSC address", scene.OscAddress, value => scene.OscAddress = value.Trim());
+            Note("A controller, OSC app, or Arduino sends this address to open this scene. Example: /scene/home. A number of 0 does not open it.");
             Heading("Experience");
             Text("Name", session.Document.Name, value =>
             {
@@ -108,6 +111,10 @@ public sealed class InspectorPanel : StackPanel
             }, structure: true);
             Number("Width", session.Document.Width, value => session.Document.Width = (int)Math.Clamp(value, 320, 7680));
             Number("Height", session.Document.Height, value => session.Document.Height = (int)Math.Clamp(value, 240, 4320));
+            Number("OSC listen port", session.Document.OscListenPort, value => session.Document.OscListenPort = (int)Math.Clamp(value, 0, 65535));
+            Text("Send OSC to", session.Document.OscSendHost, value => session.Document.OscSendHost = value.Trim());
+            Number("OSC send port", session.Document.OscSendPort, value => session.Document.OscSendPort = (int)Math.Clamp(value, 0, 65535));
+            Note("While Play is open, Intuime listens on the listen port. Point your controller, OSC app, or Arduino at this computer and that port. Buttons send OSC to the computer and port above. 127.0.0.1 is this same computer. Port 0 turns that direction off.");
             return;
         }
 
@@ -181,6 +188,9 @@ public sealed class InspectorPanel : StackPanel
             Number("Max", element.Max, value => element.Max = value);
         }
         Check("Shadow", element.HasShadow, value => element.HasShadow = value);
+        Heading("OSC");
+        Text("OSC address", element.OscAddress, value => element.OscAddress = value.Trim());
+        Note("Example: /begin. A controller that sends /begin does the same as a tap while this scene is on screen. A person tapping it sends /begin to the other device. A number of 0 does not tap. A word sent to text replaces the words.");
     }
 
     private Control TapEffectPin(SceneElement element)
@@ -598,6 +608,18 @@ public sealed class InspectorPanel : StackPanel
                     FontSize = 12
                 });
                 break;
+        }
+        if (action.Kind == ActionKind.SendOsc)
+        {
+            panel.Children.Add(TextControl("OSC address", action.Text, value => action.Text = value.Trim()));
+            panel.Children.Add(TextControl("Value", action.VariableValue, value => action.VariableValue = value));
+            panel.Children.Add(new TextBlock
+            {
+                Text = "Sends this message to the computer in Send OSC to. Leave the value empty to send 1. A number sends a number, and a word sends that word. {{name}} sends a variable.",
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = Painting.Brush(Painting.Muted),
+                FontSize = 12
+            });
         }
         if (action.Kind == ActionKind.OpenUrl)
         {
