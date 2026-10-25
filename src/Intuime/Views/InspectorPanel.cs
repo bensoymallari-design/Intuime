@@ -282,9 +282,20 @@ public sealed class InspectorPanel : StackPanel
     {
         scene.PullLegacyBackground();
         Heading("Backgrounds");
-        Note("Add more than one picture or video. They stack. Layer 1 is the back. Behind and In front swap that layer with its neighbor. A PNG with an empty background shows the layer behind it. Your buttons stay in front of all of these.");
-        var addRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var addPicture = new Button { Content = "Add picture", Classes = { "tool" } };
+        Note("Pick a built-in motion background, or add your own picture or video. Built-in designs are drawn at the experience size, so a 4K experience stays sharp, and they keep playing with no jump when they repeat. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it. Buttons stay in front of all of these.");
+        var fourK = new Button { Content = "Make the experience 4K", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
+        fourK.Click += (_, _) =>
+        {
+            if (_building)
+                return;
+            session.Document.Width = 3840;
+            session.Document.Height = 2160;
+            session.Commit(structure: true);
+            Refresh();
+        };
+        Children.Add(fourK);
+        var addRow = new WrapPanel { Orientation = Orientation.Horizontal };
+        var addPicture = new Button { Content = "Add picture", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
         addPicture.Click += async (_, _) =>
         {
             if (_building)
@@ -296,7 +307,7 @@ public sealed class InspectorPanel : StackPanel
             session.Commit();
             Refresh();
         };
-        var addVideo = new Button { Content = "Add video", Classes = { "tool" } };
+        var addVideo = new Button { Content = "Add video", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
         addVideo.Click += async (_, _) =>
         {
             if (_building)
@@ -308,8 +319,18 @@ public sealed class InspectorPanel : StackPanel
             session.Commit();
             Refresh();
         };
+        var addBuiltIn = new Button { Content = "Add built-in", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
+        addBuiltIn.Click += (_, _) =>
+        {
+            if (_building)
+                return;
+            BackgroundLayers.AddBuiltIn(scene, BuiltInBackgrounds.DefaultId);
+            session.Commit();
+            Refresh();
+        };
         addRow.Children.Add(addPicture);
         addRow.Children.Add(addVideo);
+        addRow.Children.Add(addBuiltIn);
         Children.Add(addRow);
 
         for (var index = 0; index < scene.Backgrounds.Count; index++)
@@ -317,10 +338,14 @@ public sealed class InspectorPanel : StackPanel
             var layer = scene.Backgrounds[index];
             var position = index;
             var card = new StackPanel { Spacing = 8 };
-            var file = string.IsNullOrWhiteSpace(layer.Source) ? "No file yet" : System.IO.Path.GetFileName(layer.Source);
+            var design = BuiltInBackgrounds.Find(layer.BuiltIn);
+            var file = design != null
+                ? design.Name
+                : string.IsNullOrWhiteSpace(layer.Source) ? "No file yet" : System.IO.Path.GetFileName(layer.Source);
+            var kind = design != null ? "Built-in" : layer.Video ? "Video" : "Picture";
             card.Children.Add(new TextBlock
             {
-                Text = "Layer " + (position + 1) + "  ·  " + (layer.Video ? "Video" : "Picture") + "  ·  " + file,
+                Text = "Layer " + (position + 1) + "  ·  " + kind + "  ·  " + file,
                 Foreground = Painting.Brush("#E7EEF6"),
                 FontWeight = FontWeight.SemiBold,
                 TextWrapping = TextWrapping.Wrap
@@ -330,20 +355,50 @@ public sealed class InspectorPanel : StackPanel
             LayerButton(row, "In front", () => BackgroundLayers.Move(scene, layer.Id, 1));
             LayerButton(row, "Remove", () => BackgroundLayers.Remove(scene, layer.Id));
             card.Children.Add(row);
-            card.Children.Add(LayerText("File", layer.Source, value => layer.Source = value));
-            var replace = new Button { Content = layer.Video ? "Choose video" : "Choose image", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
-            replace.Click += async (_, _) =>
+            if (design != null)
             {
-                if (_building)
-                    return;
-                var path = await _browse(layer.Video ? "video" : "image");
-                if (path == null)
-                    return;
-                layer.Source = path;
-                session.Commit();
-                Refresh();
-            };
-            card.Children.Add(replace);
+                card.Children.Add(ChoiceControl("Style", BuiltInBackgrounds.Categories(), design.Category, value => value, value =>
+                {
+                    var next = BuiltInBackgrounds.In(value).FirstOrDefault() ?? design;
+                    layer.BuiltIn = next.Id;
+                    layer.Name = next.Name;
+                    layer.Video = false;
+                    session.Commit();
+                    Refresh();
+                }));
+                card.Children.Add(ChoiceControl("Design", BuiltInBackgrounds.In(design.Category), design, item => item.Name, item =>
+                {
+                    layer.BuiltIn = item.Id;
+                    layer.Name = item.Name;
+                    layer.Video = false;
+                    session.Commit();
+                    Refresh();
+                }));
+                card.Children.Add(new TextBlock
+                {
+                    Text = "Choose a style, then a design. It plays behind your buttons in the composer and when you press Play. It loops forever and the repeat does not jump. Make the experience 4K when the screen is 3840 × 2160.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Painting.Brush(Painting.Muted),
+                    FontSize = 12
+                });
+            }
+            else
+            {
+                card.Children.Add(LayerText("File", layer.Source, value => layer.Source = value));
+                var replace = new Button { Content = layer.Video ? "Choose video" : "Choose image", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
+                replace.Click += async (_, _) =>
+                {
+                    if (_building)
+                        return;
+                    var path = await _browse(layer.Video ? "video" : "image");
+                    if (path == null)
+                        return;
+                    layer.Source = path;
+                    session.Commit();
+                    Refresh();
+                };
+                card.Children.Add(replace);
+            }
             if (layer.Video)
             {
                 card.Children.Add(LayerCheck("Loop the video", layer.Loop, value => layer.Loop = value));
