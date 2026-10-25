@@ -295,6 +295,44 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Dragging_snaps_to_center_edges_and_equal_gaps()
+    {
+        var centered = AlignGuides.Snap(new GuideBox(906, 516, 100, 40), 1920, 1080, Array.Empty<GuideBox>(), 8, grid: false, 8);
+        Assert.Equal(910, centered.X);
+        Assert.Equal(520, centered.Y);
+        Assert.Contains(centered.Lines, line => line.X1 == 960 && line.X2 == 960 && line.Y1 == 0 && line.Y2 == 1080);
+        Assert.Contains(centered.Lines, line => line.Y1 == 540 && line.Y2 == 540 && line.X1 == 0 && line.X2 == 1920);
+
+        var away = AlignGuides.Snap(new GuideBox(800, 200, 100, 40), 1920, 1080, Array.Empty<GuideBox>(), 8, grid: false, 8);
+        Assert.Equal(800, away.X);
+        Assert.Equal(200, away.Y);
+        Assert.Empty(away.Lines);
+
+        var neighbor = new GuideBox(200, 40, 80, 50);
+        var edge = AlignGuides.Snap(new GuideBox(194, 120, 60, 40), 1920, 1080, new[] { neighbor }, 8, grid: true, 8);
+        Assert.Equal(200, edge.X);
+        Assert.Contains(edge.Lines, line => line.X1 == 200 && line.X2 == 200);
+
+        var spaced = new[]
+        {
+            new GuideBox(0, 0, 100, 40),
+            new GuideBox(140, 0, 100, 40)
+        };
+        var gap = AlignGuides.Snap(new GuideBox(276, 0, 100, 40), 1920, 1080, spaced, 8, grid: false, 8);
+        Assert.Equal(280, gap.X);
+        Assert.Contains(gap.Lines, line => line.Y1 == 20 && line.X1 == 240 && line.X2 == 280);
+
+        var between = new[]
+        {
+            new GuideBox(0, 0, 100, 40),
+            new GuideBox(300, 0, 100, 40)
+        };
+        var middle = AlignGuides.Snap(new GuideBox(146, 0, 100, 40), 1920, 1080, between, 8, grid: false, 8);
+        Assert.Equal(150, middle.X);
+        Assert.Equal(2, middle.Lines.Count(line => line.Y1 == 20 && line.Y2 == 20 && line.X2 > line.X1));
+    }
+
+    [Fact]
     public void Editor_undo_duplicate_and_scene_remap()
     {
         var session = new EditorSession();

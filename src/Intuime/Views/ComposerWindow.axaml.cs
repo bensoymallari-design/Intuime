@@ -156,11 +156,14 @@ public partial class ComposerWindow : Window
     {
         Tool("Undo", () => _session.Undo());
         Tool("Redo", () => _session.Redo());
-        Tool("Snap", () =>
+        var snap = new Button { Content = "Snap", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 6, 6) };
+        ToolTip.SetTip(snap, "Snap to the grid. While you drag, pink lines also show the center, matching edges, and equal gaps.");
+        snap.Click += (_, _) =>
         {
             _session.SnapToGrid = !_session.SnapToGrid;
             SetStatus();
-        });
+        };
+        ToolBar.Children.Add(snap);
         Tool("Grid", () =>
         {
             _session.ShowGrid = !_session.ShowGrid;

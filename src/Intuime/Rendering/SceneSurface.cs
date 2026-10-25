@@ -19,6 +19,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private readonly DesignGrid _grid = new() { IsHitTestVisible = false };
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
     private readonly Canvas _marqueeLayer = new() { IsHitTestVisible = false };
+    private readonly GuideOverlay _guides = new() { IsHitTestVisible = false };
     private readonly Border _marquee = new()
     {
         BorderBrush = Painting.Brush("#E7A23A"),
@@ -62,6 +63,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         root.Children.Add(_grid);
         root.Children.Add(_canvas);
         root.Children.Add(_marqueeLayer);
+        root.Children.Add(_guides);
         _marqueeLayer.Children.Add(_marquee);
         Content = root;
         ClipToBounds = true;
@@ -798,16 +800,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         {
             var dx = point.X - _gesture.Start.X;
             var dy = point.Y - _gesture.Start.Y;
-            foreach (var origin in _gesture.Origins)
-            {
-                var element = Lookup(origin.Key);
-                if (element == null)
-                    continue;
-                element.X = Snap(origin.Value.X + dx);
-                element.Y = Snap(origin.Value.Y + dy);
-                if (_nodes.TryGetValue(element.Id, out var node))
-                    ApplyGeometry(node, element);
-            }
+            MoveSelection(dx, dy);
         }
         else if (_gesture.Kind == GestureKind.Resize && _gesture.PrimaryId != null)
         {
@@ -849,6 +842,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         }
 
         _marquee.IsVisible = false;
+        ClearGuides();
         if (gesture.Kind == GestureKind.Move)
         {
             var end = e.GetPosition(_canvas);
@@ -876,6 +870,79 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             return;
         }
         _session?.Commit();
+    }
+
+    private void MoveSelection(double dx, double dy)
+    {
+        if (_gesture == null)
+            return;
+        var proposed = new List<(string Id, double X, double Y, double Width, double Height)>();
+        foreach (var origin in _gesture.Origins)
+            proposed.Add((origin.Key, origin.Value.X + dx, origin.Value.Y + dy, origin.Value.Width, origin.Value.Height));
+        if (proposed.Count == 0)
+        {
+            ClearGuides();
+            return;
+        }
+
+        var minX = proposed.Min(item => item.X);
+        var minY = proposed.Min(item => item.Y);
+        var moving = new GuideBox(
+            minX,
+            minY,
+            proposed.Max(item => item.X + item.Width) - minX,
+            proposed.Max(item => item.Y + item.Height) - minY);
+        var movingIds = _gesture.Origins.Keys.ToHashSet();
+        var others = Scene()?.Elements
+            .Where(element => element.IsVisible && !movingIds.Contains(element.Id))
+            .Select(element => new GuideBox(element.X, element.Y, element.Width, element.Height))
+            .ToList() ?? new List<GuideBox>();
+        var size = DocumentSize();
+        var zoom = Math.Max(0.2, _session?.Zoom ?? 1);
+        var placed = AlignGuides.Snap(
+            moving,
+            size.Width,
+            size.Height,
+            others,
+            Math.Max(6, 8 / zoom),
+            _session?.SnapToGrid == true,
+            _session?.GridSize ?? 8);
+        var shiftX = placed.X - minX;
+        var shiftY = placed.Y - minY;
+        foreach (var item in proposed)
+        {
+            var element = Lookup(item.Id);
+            if (element == null)
+                continue;
+            element.X = item.X + shiftX;
+            element.Y = item.Y + shiftY;
+            if (_nodes.TryGetValue(element.Id, out var node))
+                ApplyGeometry(node, element);
+        }
+        ShowGuides(placed.Lines);
+    }
+
+    private void ShowGuides(IReadOnlyList<AlignGuide> lines)
+    {
+        if (!_design || lines.Count == 0)
+        {
+            ClearGuides();
+            return;
+        }
+        var zoom = Math.Max(0.2, _session?.Zoom ?? 1);
+        _guides.OriginX = _originX;
+        _guides.OriginY = _originY;
+        _guides.Thickness = Math.Clamp(2 / zoom, 1.25, 4);
+        _guides.Lines = lines;
+        _guides.InvalidateVisual();
+    }
+
+    private void ClearGuides()
+    {
+        if (_guides.Lines.Count == 0)
+            return;
+        _guides.Lines = Array.Empty<AlignGuide>();
+        _guides.InvalidateVisual();
     }
 
     private void Resize(SceneElement element, LayoutBox origin, Point point, bool keepAspect)
@@ -1139,6 +1206,26 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     }
 
     private readonly record struct LayoutBox(double X, double Y, double Width, double Height);
+}
+
+public sealed class GuideOverlay : Control
+{
+    public IReadOnlyList<AlignGuide> Lines { get; set; } = Array.Empty<AlignGuide>();
+    public double OriginX { get; set; }
+    public double OriginY { get; set; }
+    public double Thickness { get; set; } = 2;
+
+    public override void Render(DrawingContext context)
+    {
+        if (Lines.Count == 0)
+            return;
+        var pen = new Pen(Painting.Brush("#FF4FA3"), Thickness);
+        foreach (var guide in Lines)
+            context.DrawLine(
+                pen,
+                new Point(guide.X1 - OriginX, guide.Y1 - OriginY),
+                new Point(guide.X2 - OriginX, guide.Y2 - OriginY));
+    }
 }
 
 public sealed class DesignGrid : Control
