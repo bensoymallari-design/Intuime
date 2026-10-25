@@ -608,12 +608,17 @@ public static class IconArt
     private static void Volume(DrawingContext dc, IBrush brush, Box box, bool mute)
     {
         Poly(dc, brush, box.P(0.12, 0.38), box.P(0.30, 0.38), box.P(0.48, 0.18), box.P(0.48, 0.82), box.P(0.30, 0.62), box.P(0.12, 0.62));
+        if (mute)
+        {
+            Line(dc, brush, box, 0.62, 0.34, 0.88, 0.66, 0.08);
+            Line(dc, brush, box, 0.88, 0.34, 0.62, 0.66, 0.08);
+            return;
+        }
+
         var pen = new Pen(brush, Math.Max(1.4, box.W * 0.07)) { LineCap = PenLineCap.Round };
         dc.DrawLine(pen, box.P(0.60, 0.36), box.P(0.78, 0.28));
         dc.DrawLine(pen, box.P(0.60, 0.50), box.P(0.84, 0.50));
         dc.DrawLine(pen, box.P(0.60, 0.64), box.P(0.78, 0.72));
-        if (mute)
-            Cross(dc, brush, box);
     }
 
     private static void Music(DrawingContext dc, IBrush brush, Box box)
@@ -938,7 +943,8 @@ public static class IconArt
         using (var ctx = geo.Open())
         {
             ctx.BeginFigure(box.P(x1, y1), false);
-            ctx.ArcTo(box.P(x2, y2), new Size(box.W * 0.22, box.W * 0.16), 0, false, down ? SweepDirection.Clockwise : SweepDirection.CounterClockwise);
+            // Y grows downward, so a smile (center lower than the corners) is the counter-clockwise arc.
+            ctx.ArcTo(box.P(x2, y2), new Size(box.W * 0.22, box.W * 0.16), 0, false, down ? SweepDirection.CounterClockwise : SweepDirection.Clockwise);
         }
         dc.DrawGeometry(null, new Pen(brush, Math.Max(1.4, box.W * 0.05)) { LineCap = PenLineCap.Round }, geo);
     }
