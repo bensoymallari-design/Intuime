@@ -310,7 +310,7 @@ public sealed class InspectorPanel : StackPanel
     {
         scene.PullLegacyBackground();
         Heading("Backgrounds");
-        Note("Pick a built-in motion background, or add your own picture or video. Built-in designs are drawn at the experience size, so a 4K experience stays sharp, and they keep playing with no jump when they repeat. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it. Buttons stay in front of all of these.");
+        Note("Add a picture, a video, a web link, or a built-in motion background. A link opens that site in Play and fills its layer, with your buttons still in front. Built-in designs stay sharp at the experience size and repeat without a jump. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it.");
         var fourK = new Button { Content = "Make the experience 4K", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
         fourK.Click += (_, _) =>
         {
@@ -347,6 +347,15 @@ public sealed class InspectorPanel : StackPanel
             session.Commit();
             Refresh();
         };
+        var addLink = new Button { Content = "Add link", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
+        addLink.Click += (_, _) =>
+        {
+            if (_building)
+                return;
+            BackgroundLayers.AddLink(scene, "https://example.com");
+            session.Commit();
+            Refresh();
+        };
         var addBuiltIn = new Button { Content = "Add built-in", Classes = { "tool" }, Margin = new Avalonia.Thickness(0, 0, 8, 8) };
         addBuiltIn.Click += (_, _) =>
         {
@@ -358,6 +367,7 @@ public sealed class InspectorPanel : StackPanel
         };
         addRow.Children.Add(addPicture);
         addRow.Children.Add(addVideo);
+        addRow.Children.Add(addLink);
         addRow.Children.Add(addBuiltIn);
         Children.Add(addRow);
 
@@ -367,10 +377,12 @@ public sealed class InspectorPanel : StackPanel
             var position = index;
             var card = new StackPanel { Spacing = 8 };
             var design = BuiltInBackgrounds.Find(layer.BuiltIn);
-            var file = design != null
-                ? design.Name
-                : string.IsNullOrWhiteSpace(layer.Source) ? "No file yet" : System.IO.Path.GetFileName(layer.Source);
-            var kind = design != null ? "Built-in" : layer.Video ? "Video" : "Picture";
+            var file = layer.Link
+                ? string.IsNullOrWhiteSpace(layer.Source) ? "No address yet" : layer.Source
+                : design != null
+                    ? design.Name
+                    : string.IsNullOrWhiteSpace(layer.Source) ? "No file yet" : System.IO.Path.GetFileName(layer.Source);
+            var kind = layer.Link ? "Web page" : design != null ? "Built-in" : layer.Video ? "Video" : "Picture";
             card.Children.Add(new TextBlock
             {
                 Text = "Layer " + (position + 1) + "  ·  " + kind + "  ·  " + file,
@@ -383,7 +395,18 @@ public sealed class InspectorPanel : StackPanel
             LayerButton(row, "In front", () => BackgroundLayers.Move(scene, layer.Id, 1));
             LayerButton(row, "Remove", () => BackgroundLayers.Remove(scene, layer.Id));
             card.Children.Add(row);
-            if (design != null)
+            if (layer.Link)
+            {
+                card.Children.Add(LayerText("Web address", layer.Source, value => layer.Source = value.Trim()));
+                card.Children.Add(new TextBlock
+                {
+                    Text = "In Play this address opens by itself and fills this layer. It stays inside Intuime. Buttons on the scene stay on top. There is no close, minimize, or maximize button.",
+                    TextWrapping = TextWrapping.Wrap,
+                    Foreground = Painting.Brush(Painting.Muted),
+                    FontSize = 12
+                });
+            }
+            else if (design != null)
             {
                 card.Children.Add(ChoiceControl("Style", BuiltInBackgrounds.Categories(), design.Category, value => value, value =>
                 {
