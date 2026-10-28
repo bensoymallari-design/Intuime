@@ -5,6 +5,7 @@ namespace Intuime.Views;
 static class LinuxWebFrame
 {
     private static readonly HashSet<IntPtr> Owned = new();
+    private static readonly HashSet<IntPtr> Redirected = new();
     private static readonly XErrorHandler IgnoreError = (_, _) => 0;
     private static readonly byte[] Keymap = new byte[32];
     private static IntPtr _display;
@@ -90,7 +91,18 @@ static class LinuxWebFrame
         var display = Display();
         if (display == IntPtr.Zero)
             return;
-        XRaiseWindow(display, window);
+        // A kiosk page is fullscreen, which sits above a normal topmost window.
+        // Override-redirect leaves the window manager out so the arrow stays on top.
+        if (Redirected.Add(window))
+        {
+            var attributes = new byte[112];
+            attributes[88] = 1;
+            XChangeWindowAttributes(display, window, 512, attributes);
+            XUnmapWindow(display, window);
+            XMapRaised(display, window);
+        }
+        else
+            XRaiseWindow(display, window);
         XFlush(display);
     }
 
@@ -213,6 +225,12 @@ static class LinuxWebFrame
 
     [DllImport("libX11.so.6")]
     private static extern int XRaiseWindow(IntPtr display, IntPtr window);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XMapRaised(IntPtr display, IntPtr window);
+
+    [DllImport("libX11.so.6")]
+    private static extern int XChangeWindowAttributes(IntPtr display, IntPtr window, ulong valuemask, byte[] attributes);
 
     [DllImport("libXext.so.6")]
     private static extern void XShapeCombineRectangles(IntPtr display, IntPtr window, int destination, int x, int y, XRectangle[] rectangles, int count, int operation, int ordering);
