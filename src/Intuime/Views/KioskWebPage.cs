@@ -1,13 +1,18 @@
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Threading;
 using Intuime.Core;
 
 namespace Intuime.Views;
 
 public sealed class KioskWebPage : Grid
 {
+    private static readonly List<KioskWebPage> Pages = new();
+    private static bool _guardHooked;
+
     private NativeWebView? _view;
     private int _showToken;
+    private bool _opening;
 
     public event Action<string>? Failed;
 
@@ -20,7 +25,11 @@ public sealed class KioskWebPage : Grid
         HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Center;
         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
         Background = Avalonia.Media.Brushes.Black;
+        Pages.Add(this);
+        HookGuard();
     }
+
+    public void Release() => Pages.Remove(this);
 
     public void Fit(double width, double height)
     {
@@ -42,6 +51,7 @@ public sealed class KioskWebPage : Grid
 
         try
         {
+            _opening = true;
             Ensure();
             error = "";
             var token = ++_showToken;
@@ -62,11 +72,8 @@ public sealed class KioskWebPage : Grid
         }
         catch (Exception ex)
         {
-            IsVisible = false;
-            IsHitTestVisible = false;
-            error = string.IsNullOrWhiteSpace(ex.Message)
-                ? "That page could not open inside the kiosk."
-                : ex.Message;
+            error = Explain(ex);
+            Abandon();
             return false;
         }
     }
@@ -74,6 +81,7 @@ public sealed class KioskWebPage : Grid
     public void HidePage()
     {
         _showToken++;
+        _opening = false;
         IsVisible = false;
         IsHitTestVisible = false;
         if (_view == null)
@@ -124,5 +132,81 @@ public sealed class KioskWebPage : Grid
         };
         _view = view;
         Children.Add(view);
+    }
+
+    private static void HookGuard()
+    {
+        if (_guardHooked)
+            return;
+        _guardHooked = true;
+        Dispatcher.UIThread.UnhandledException += (_, args) =>
+        {
+            if (!IsWebFault(args.Exception))
+                return;
+            args.Handled = true;
+            var message = Explain(args.Exception);
+            foreach (var page in Pages.ToArray())
+                page.Fail(message);
+        };
+    }
+
+    private void Fail(string message)
+    {
+        if (!_opening && _view == null)
+            return;
+        Abandon();
+        Failed?.Invoke(message);
+    }
+
+    private void Abandon()
+    {
+        _opening = false;
+        _showToken++;
+        IsVisible = false;
+        IsHitTestVisible = false;
+        var view = _view;
+        _view = null;
+        if (view == null)
+            return;
+        try
+        {
+            Children.Remove(view);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private static bool IsWebFault(Exception exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            var text = current.GetType().FullName + " " + current.Message + " " + current.StackTrace;
+            if (text.Contains("NativeWebView", StringComparison.Ordinal) ||
+                text.Contains("WebView", StringComparison.Ordinal) ||
+                text.Contains("webkit", StringComparison.OrdinalIgnoreCase) ||
+                text.Contains("WebKit", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
+    }
+
+    private static string Explain(Exception exception)
+    {
+        var missing = false;
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is DllNotFoundException or FileNotFoundException or TypeLoadException)
+                missing = true;
+            var message = current.Message ?? "";
+            if (message.Contains("WebView2", StringComparison.OrdinalIgnoreCase) &&
+                (message.Contains("not found", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("couldn't", StringComparison.OrdinalIgnoreCase) ||
+                 message.Contains("could not", StringComparison.OrdinalIgnoreCase)))
+                missing = true;
+        }
+        return missing
+            ? "The web viewer is missing on this computer, so the page stayed closed."
+            : "That page could not open inside the kiosk. Intuime stayed open.";
     }
 }

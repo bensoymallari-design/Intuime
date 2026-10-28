@@ -34,6 +34,8 @@ public sealed class PlayerWindow : Window
     private readonly TextBlock _status;
     private readonly KioskWebPage _page = new();
     private string _openPageUrl = "";
+    private string? _queuedUrl;
+    private bool _playerReady;
     private readonly SceneSurface _pageButtons = new();
     private readonly LayoutTransformControl _pageButtonsHost = new()
     {
@@ -99,7 +101,7 @@ public sealed class PlayerWindow : Window
             TextAlignment = TextAlignment.Center,
             IsVisible = false
         };
-        _page.Failed += ShowStatus;
+        _page.Failed += OnPageFailed;
         if (OperatingSystem.IsLinux())
         {
             _pageButtonsHost.HorizontalAlignment = HorizontalAlignment.Left;
@@ -139,6 +141,8 @@ public sealed class PlayerWindow : Window
                 return;
             _fade = 0;
             _status.IsVisible = false;
+            _queuedUrl = null;
+            _openPageUrl = "";
             _page.HidePage();
             _pageButtonsHost.IsVisible = false;
             if (_buttonsWindow?.IsVisible == true)
@@ -198,6 +202,8 @@ public sealed class PlayerWindow : Window
                 Height = _monitor.Bounds.Height / scale;
             }
             Focus();
+            _playerReady = true;
+            FlushQueuedPage();
         };
         _osc = _ownsClock ? new OscLink(_engine, _engine.Live) : null;
         Closed += (_, _) =>
@@ -206,6 +212,7 @@ public sealed class PlayerWindow : Window
             _osc?.Dispose();
             if (_buttonsWindow != null)
                 _buttonsWindow.Close();
+            _page.Release();
             DisposeHosts();
         };
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
@@ -929,7 +936,44 @@ public sealed class PlayerWindow : Window
         _status.IsVisible = true;
     }
 
+    private void OnPageFailed(string message)
+    {
+        _queuedUrl = null;
+        _openPageUrl = "";
+        _pageButtonsHost.IsVisible = false;
+        if (_buttonsWindow?.IsVisible == true)
+            _buttonsWindow.Hide();
+        LinuxWebFrame.Hide();
+        ShowStatus(message);
+    }
+
     private void OpenUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+        _queuedUrl = url;
+        if (!_playerReady)
+            return;
+        var snapshot = url;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!string.Equals(_queuedUrl, snapshot, StringComparison.Ordinal))
+                return;
+            _queuedUrl = null;
+            OpenUrlNow(snapshot);
+        });
+    }
+
+    private void FlushQueuedPage()
+    {
+        var url = _queuedUrl;
+        if (string.IsNullOrWhiteSpace(url))
+            return;
+        _queuedUrl = null;
+        OpenUrlNow(url);
+    }
+
+    private void OpenUrlNow(string url)
     {
         if (!_page.TryShow(url, out var error))
         {
