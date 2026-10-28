@@ -106,11 +106,14 @@ public class SceneWebReturnTests
         Assert.Contains("--window-position=10,20", chrome);
         Assert.Contains("--window-size=800,600", chrome);
 
-        var edge = SiteLaunch.Arguments(@"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "https://example.com", "profile", 0, 0, 1920, 1080);
-        Assert.Contains("--kiosk", edge);
-        Assert.Contains("--edge-kiosk-type=fullscreen", edge);
-        Assert.DoesNotContain(edge, arg => arg.StartsWith("--app=", StringComparison.Ordinal));
-        Assert.Equal("https://example.com", edge[^1]);
+        var edge = SiteLaunch.Arguments(@"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "https://example.com", "profile", 0, 0, 1920, 1080, windows: true);
+        Assert.Contains("--app=https://example.com", edge);
+        Assert.DoesNotContain("--kiosk", edge);
+        Assert.DoesNotContain("--edge-kiosk-type=fullscreen", edge);
+
+        var edgeOnLinux = SiteLaunch.Arguments("msedge", "https://example.com", "profile", 0, 0, 1920, 1080);
+        Assert.Contains("--kiosk", edgeOnLinux);
+        Assert.DoesNotContain("--edge-kiosk-type=fullscreen", edgeOnLinux);
 
         var firefox = SiteLaunch.Arguments("firefox", "https://example.com", "profile", 0, 0, 100, 100);
         Assert.Contains("-kiosk", firefox);
