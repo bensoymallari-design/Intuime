@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
 using Avalonia;
 using Intuime.Core;
 
@@ -12,11 +14,13 @@ sealed class SiteWindow : IDisposable
 {
     private readonly Process? _process;
     private readonly string? _profile;
+    private readonly bool _lockFrame;
 
-    private SiteWindow(Process? process, string? profile)
+    private SiteWindow(Process? process, string? profile, bool lockFrame)
     {
         _process = process;
         _profile = profile;
+        _lockFrame = lockFrame;
     }
 
     public static bool TryOpen(string url, PixelRect bounds, out SiteWindow? site, out string error)
@@ -33,6 +37,9 @@ sealed class SiteWindow : IDisposable
         try
         {
             Directory.CreateDirectory(profile);
+            // A brand-new profile otherwise sits on the browser's first-run page, which is blank in a locked window.
+            File.WriteAllBytes(Path.Combine(profile, "First Run"), Array.Empty<byte>());
+            var edgeOnWindows = OperatingSystem.IsWindows() && SiteLaunch.IsEdge(browser);
             var start = new ProcessStartInfo
             {
                 FileName = browser,
@@ -46,7 +53,7 @@ sealed class SiteWindow : IDisposable
                 error = "That site could not open, so you stayed on the scene.";
                 return false;
             }
-            site = new SiteWindow(process, profile);
+            site = new SiteWindow(process, profile, edgeOnWindows);
             error = "";
             return true;
         }
@@ -93,7 +100,92 @@ sealed class SiteWindow : IDisposable
     }
 
     private static IEnumerable<string> Arguments(string browser, string url, string profile, PixelRect bounds) =>
-        SiteLaunch.Arguments(Path.GetFileName(browser), url, profile, bounds.X, bounds.Y, bounds.Width, bounds.Height);
+        SiteLaunch.Arguments(Path.GetFileName(browser), url, profile, bounds.X, bounds.Y, bounds.Width, bounds.Height, OperatingSystem.IsWindows());
+
+    /// <summary>
+    /// Edge paints in app mode, which still has a title bar. Drop that bar so only the arrow remains.
+    /// </summary>
+    public void HoldOpen(PixelRect bounds)
+    {
+        if (!_lockFrame || !OperatingSystem.IsWindows() || string.IsNullOrEmpty(_profile) || bounds.Width < 1 || bounds.Height < 1)
+            return;
+        var profile = _profile;
+        EnumWindows((hwnd, _) =>
+        {
+            TryLock(hwnd, profile, bounds);
+            return true;
+        }, IntPtr.Zero);
+    }
+
+    private static void TryLock(IntPtr hwnd, string profile, PixelRect bounds)
+    {
+        if (!IsWindowVisible(hwnd))
+            return;
+        GetWindowThreadProcessId(hwnd, out var pid);
+        var command = CommandLine(pid);
+        if (command == null || command.IndexOf(profile, StringComparison.OrdinalIgnoreCase) < 0)
+            return;
+        if (!GetWindowRect(hwnd, out var rect))
+            return;
+        var width = rect.Right - rect.Left;
+        var height = rect.Bottom - rect.Top;
+        if (width < 300 || height < 200)
+            return;
+
+        const int chrome = 0x00C00000 | 0x00040000 | 0x00020000 | 0x00010000 | 0x00080000;
+        var style = GetWindowLong(hwnd, -16);
+        var wanted = (style | unchecked((int)0x80000000) | 0x10000000) & ~chrome;
+        var placed = rect.Left == bounds.X && rect.Top == bounds.Y && width == bounds.Width && height == bounds.Height;
+        if (style == wanted && placed)
+            return;
+        if (style != wanted)
+            SetWindowLong(hwnd, -16, wanted);
+        SetWindowPos(hwnd, IntPtr.Zero, bounds.X, bounds.Y, bounds.Width, bounds.Height, 0x0020 | 0x0004 | 0x0010);
+    }
+
+    private static string? CommandLine(uint pid)
+    {
+        var handle = OpenProcess(0x0400 | 0x0010, false, pid);
+        if (handle == IntPtr.Zero)
+            return null;
+        try
+        {
+            var info = new ProcessBasicInformation();
+            if (NtQueryInformationProcess(handle, 0, ref info, Marshal.SizeOf<ProcessBasicInformation>(), out _) != 0)
+                return null;
+            if (!ReadPointer(handle, info.PebBaseAddress + 0x20, out var parameters))
+                return null;
+            var header = new byte[16];
+            if (!ReadProcessMemory(handle, parameters + 0x70, header, header.Length, out _))
+                return null;
+            var length = BitConverter.ToUInt16(header, 0);
+            var buffer = BitConverter.ToInt64(header, 8);
+            if (length < 2 || buffer == 0)
+                return null;
+            var text = new byte[length];
+            if (!ReadProcessMemory(handle, new IntPtr(buffer), text, text.Length, out _))
+                return null;
+            return Encoding.Unicode.GetString(text);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    private static bool ReadPointer(IntPtr process, IntPtr address, out IntPtr value)
+    {
+        var bytes = new byte[IntPtr.Size];
+        value = IntPtr.Zero;
+        if (!ReadProcessMemory(process, address, bytes, bytes.Length, out _))
+            return false;
+        value = IntPtr.Size == 8 ? new IntPtr(BitConverter.ToInt64(bytes, 0)) : new IntPtr(BitConverter.ToInt32(bytes, 0));
+        return value != IntPtr.Zero;
+    }
 
     internal static void KeepAbove(IntPtr window)
     {
@@ -174,7 +266,59 @@ sealed class SiteWindow : IDisposable
         SetWindowRgn(window, combined, true);
     }
 
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lparam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessBasicInformation
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowRect
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lparam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out WindowRect rect);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    private static extern int GetWindowLong(IntPtr hwnd, int index);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, int size, out IntPtr read);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref ProcessBasicInformation info, int size, out int returned);
+
+    [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
