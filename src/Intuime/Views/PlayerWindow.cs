@@ -86,7 +86,7 @@ public sealed class PlayerWindow : Window
         _scaler.Child = _surface;
         _hint = new TextBlock
         {
-            Text = "Esc exits    ·    F11 full screen    ·    arrow keys change scene",
+            Text = "Esc exits    ·    mouse wheel moves the orange outline    ·    Enter presses it",
             Foreground = Brushes.White,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
@@ -222,10 +222,14 @@ public sealed class PlayerWindow : Window
             DisposeHosts();
         };
         AddHandler(KeyDownEvent, OnKey, RoutingStrategies.Tunnel);
+        AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
+        _buttonsWindow?.AddHandler(PointerWheelChangedEvent, OnWheel, RoutingStrategies.Tunnel);
         PointerPressed += (_, _) => Focus();
     }
 
     public void PressKey(string key) => _engine.KeyPressed(key, _screen);
+
+    public void PressHighlighted() => _engine.PressScrollTarget(_screen, fromOsc: false);
 
     public void ShowOscProblem()
     {
@@ -1059,7 +1063,24 @@ public sealed class PlayerWindow : Window
             e.Handled = true;
             return;
         }
+        if (e.Key is Key.Enter or Key.Space)
+        {
+            _engine.PressScrollTarget(_screen, fromOsc: false);
+            e.Handled = true;
+            return;
+        }
         _engine.KeyPressed(e.Key.ToString(), _screen);
+        e.Handled = true;
+    }
+
+    private void OnWheel(object? sender, PointerWheelEventArgs e)
+    {
+        if (!ReferenceEquals(sender, _buttonsWindow) && _page.IsVisible && _page.Bounds.Contains(e.GetPosition(_page)))
+            return;
+        var delta = Math.Abs(e.Delta.Y) >= 0.01 ? e.Delta.Y : e.Delta.X;
+        if (Math.Abs(delta) < 0.01)
+            return;
+        _engine.Scroll(delta > 0 ? -1 : 1, _screen);
         e.Handled = true;
     }
 

@@ -32,6 +32,7 @@ public partial class ComposerWindow : Window
     public ComposerWindow()
     {
         InitializeComponent();
+        AddHandler(KeyDownEvent, OnPlayerKey, RoutingStrategies.Tunnel);
         _inspector = new InspectorPanel(BrowseAsset);
         InspectorHost.Content = _inspector;
         _inspector.PinnedEffectChanged += () =>
@@ -360,6 +361,17 @@ public partial class ComposerWindow : Window
             return;
         var ids = (LayerList.SelectedItems ?? new System.Collections.ArrayList()).OfType<ListBoxItem>().Select(item => item.Tag as string).Where(id => id != null).ToHashSet();
         _session.SetSelection(_session.ActiveScene.Elements.Where(element => ids.Contains(element.Id)));
+    }
+
+    private void OnPlayerKey(object? sender, KeyEventArgs e)
+    {
+        if (e.Source is TextBox || e.Key is not (Key.Enter or Key.Space))
+            return;
+        var player = _players.FirstOrDefault(item => item.IsVisible);
+        if (player == null)
+            return;
+        player.PressHighlighted();
+        e.Handled = true;
     }
 
     private async void OnKeyDown(object? sender, KeyEventArgs e)

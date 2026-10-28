@@ -31,6 +31,7 @@ public sealed class PlaybackEngine
     public ExperienceDocument Original { get; }
     public ExperienceDocument Live { get; }
     public Scene? Current => SceneFor(_focusScreen);
+    public string? ScrollTargetId { get; private set; }
 
     public Scene? SceneFor(int screen) =>
         _showing.TryGetValue(screen, out var id) ? Live.Scenes.FirstOrDefault(sceneItem => sceneItem.Id == id) : null;
@@ -120,11 +121,85 @@ public sealed class PlaybackEngine
 
     public void PointerUp(string elementId) => PointerUp(elementId, fromOsc: false);
 
+    public void Scroll(int steps) => Scroll(steps, _focusScreen);
+
+    public void Scroll(int steps, int screen)
+    {
+        if (steps == 0)
+            return;
+        if (_showing.ContainsKey(screen))
+            _focusScreen = screen;
+        var choices = ScrollChoices();
+        if (choices.Count == 0)
+        {
+            if (ScrollTargetId != null)
+            {
+                ScrollTargetId = null;
+                Changed?.Invoke();
+            }
+            return;
+        }
+
+        NotifyActivity();
+        var index = choices.FindIndex(element => element.Id == ScrollTargetId);
+        if (index < 0)
+            index = steps > 0 ? -1 : 0;
+        var next = (long)index + steps;
+        var count = choices.Count;
+        next %= count;
+        if (next < 0)
+            next += count;
+        ScrollTargetId = choices[(int)next].Id;
+        Changed?.Invoke();
+    }
+
+    public void PressScrollTarget() => PressScrollTarget(_focusScreen, fromOsc: true);
+
+    public void PressScrollTarget(int screen, bool fromOsc)
+    {
+        if (_showing.ContainsKey(screen))
+            _focusScreen = screen;
+        var choices = ScrollChoices();
+        if (choices.Count == 0)
+            return;
+        if (choices.All(element => element.Id != ScrollTargetId))
+            ScrollTargetId = choices[0].Id;
+        PointerUp(ScrollTargetId!, fromOsc);
+    }
+
     public void ReceiveOsc(OscMessage message)
     {
         var address = OscAddresses.Canonical(message.Address);
         if (address.Length <= 1)
             return;
+        if (IsScrollAddress(address))
+        {
+            if (message.Number is 0)
+                return;
+            var steps = message.Number == null
+                ? 1
+                : (int)Math.Round(message.Number.Value, MidpointRounding.AwayFromZero);
+            if (steps == 0)
+                return;
+            Scroll(steps);
+            return;
+        }
+        if (IsPressAddress(address))
+        {
+            var pressReleased = message.Text == null && message.Number is <= 0;
+            if (pressReleased)
+                return;
+            _suppressOscEcho = true;
+            try
+            {
+                PressScrollTarget(_focusScreen, fromOsc: true);
+            }
+            finally
+            {
+                _suppressOscEcho = false;
+            }
+            return;
+        }
         var released = message.Text == null && message.Number is <= 0;
         var elementIds = Showing()
             .SelectMany(scene => scene.Elements)
@@ -312,10 +387,30 @@ public sealed class PlaybackEngine
         Run(destination.Interactions, TriggerKind.SceneEnter, null, null);
         if (SceneFor(screen)?.Id == sceneId)
         {
+            ScrollTargetId = ScrollChoices().FirstOrDefault()?.Id;
             Changed?.Invoke();
             EmitOsc(destination.OscAddress, number: 1, automatic: true);
         }
     }
+
+    private List<SceneElement> ScrollChoices()
+    {
+        var scene = Current;
+        if (scene == null)
+            return new List<SceneElement>();
+        return scene.Elements
+            .Where(element => element.IsVisible && ElementFactory.CapturesPointer(element))
+            .OrderBy(element => element.Y)
+            .ThenBy(element => element.X)
+            .ThenBy(element => element.Z)
+            .ToList();
+    }
+
+    private static bool IsScrollAddress(string address) =>
+        OscAddresses.Same(address, "/scroll") || OscAddresses.Same(address, "/intuime/scroll");
+
+    private static bool IsPressAddress(string address) =>
+        OscAddresses.Same(address, "/press") || OscAddresses.Same(address, "/intuime/press");
 
     private void DropMotion(HashSet<string> elementIds)
     {

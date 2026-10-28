@@ -832,6 +832,39 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Living_motion_loops_and_round_trips()
+    {
+        Assert.Equal(LivingEffects.Pose.Still, LivingEffects.At("missing", 1, 1));
+        var still = LivingEffects.At("Breathe", 0, 1);
+        Assert.Equal(1, still.Scale);
+        var grown = LivingEffects.At("Breathe", LivingEffects.PeriodSeconds("Breathe") / 4, 1);
+        Assert.True(grown.Scale > 1.06);
+        var hop = LivingEffects.At("Bounce", LivingEffects.PeriodSeconds("Bounce") / 4, 1);
+        Assert.True(hop.ShiftY < -20);
+        Assert.True(hop.ScaleY < 1);
+        var tilt = LivingEffects.At("Tilt", LivingEffects.PeriodSeconds("Tilt") / 4, 2);
+        Assert.True(tilt.ScaleX > 1.2);
+        Assert.True(Math.Abs(tilt.Rotation) > 10);
+        var wave = LivingEffects.At("Wave", LivingEffects.PeriodSeconds("Wave") / 2, 1);
+        Assert.Equal(0.5, wave.Wave, 3);
+        Assert.True(LivingEffects.HighlightScale(0.35) > 1.08);
+
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.Motion = "Float";
+        button.TapStrength = 1.4;
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "room",
+            Scenes = { new Scene { Id = "room", Elements = { button } } }
+        };
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(document));
+        Assert.Equal("Float", loaded.Scenes[0].Elements[0].Motion);
+        Assert.Equal(1.4, loaded.Scenes[0].Elements[0].TapStrength);
+        var quiet = ProjectStore.Deserialize("{\"scenes\":[{\"id\":\"room\",\"elements\":[{\"id\":\"a\",\"kind\":\"text\"}]}],\"startSceneId\":\"room\"}");
+        Assert.Equal("", quiet.Scenes[0].Elements[0].Motion);
+    }
+
+    [Fact]
     public void Each_screen_keeps_its_own_scene_and_its_own_start()
     {
         var go = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
@@ -1008,6 +1041,100 @@ public class ExperienceTests
         Assert.Equal("/lights/4", sent.Single().Address);
         Assert.Equal(4, sent.Single().Number);
         Assert.True(sent.Single().Integer);
+    }
+
+    [Fact]
+    public void Scroll_moves_through_buttons_and_press_runs_the_outlined_one()
+    {
+        SceneElement Button(string id, double x, double y, string picked, string? scene = null)
+        {
+            var button = ElementFactory.Create(ElementKind.Button, x, y, 0, 1);
+            button.Id = id;
+            button.Text = id;
+            button.OscAddress = "/" + id;
+            button.Interactions.Add(new Interaction
+            {
+                Trigger = TriggerKind.Tap,
+                Actions =
+                {
+                    new ExperienceAction { Kind = ActionKind.SetVariable, VariableName = "picked", VariableValue = picked }
+                }
+            });
+            if (scene != null)
+                button.Interactions[0].Actions.Add(new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = scene });
+            return button;
+        }
+
+        var title = ElementFactory.Create(ElementKind.Text, 0, 0, 0, 1);
+        title.Id = "title";
+        title.Text = "Choose";
+        var home = new Scene
+        {
+            Id = "home",
+            Name = "Home",
+            OscAddress = "/scene/home",
+            Elements =
+            {
+                title,
+                Button("top", 40, 40, "top"),
+                Button("middle", 20, 180, "middle"),
+                Button("bottom", 80, 360, "bottom", scene: "room")
+            }
+        };
+        var roomButton = ElementFactory.Create(ElementKind.Button, 10, 10, 0, 1);
+        roomButton.Id = "room-go";
+        roomButton.Text = "Again";
+        var room = new Scene
+        {
+            Id = "room",
+            Name = "Room",
+            Elements = { roomButton }
+        };
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "home",
+            Variables = { new ExperienceVariable { Name = "picked", Value = "" } },
+            Scenes = { home, room }
+        };
+        var sent = new List<OscMessage>();
+        var engine = new PlaybackEngine(document);
+        engine.OscSend += sent.Add;
+        engine.Start();
+        Assert.Equal("top", engine.ScrollTargetId);
+        sent.Clear();
+
+        engine.Scroll(0);
+        Assert.Equal("top", engine.ScrollTargetId);
+        engine.Scroll(1);
+        Assert.Equal("middle", engine.ScrollTargetId);
+        engine.Scroll(1);
+        Assert.Equal("bottom", engine.ScrollTargetId);
+        engine.Scroll(1);
+        Assert.Equal("top", engine.ScrollTargetId);
+        engine.ReceiveOsc(new OscMessage { Address = "/scroll", Number = -1, Integer = true });
+        Assert.Equal("bottom", engine.ScrollTargetId);
+        Assert.Equal("", TextTemplates.Get(engine.Live, "picked"));
+
+        engine.ReceiveOsc(new OscMessage { Address = "/press", Number = 0, Integer = true });
+        Assert.Equal("home", engine.Current!.Id);
+        Assert.Equal("bottom", engine.ScrollTargetId);
+        Assert.Equal("", TextTemplates.Get(engine.Live, "picked"));
+
+        engine.ReceiveOsc(new OscMessage { Address = "/intuime/press", Number = 1, Integer = true });
+        Assert.Equal("room", engine.Current!.Id);
+        Assert.Equal("bottom", TextTemplates.Get(engine.Live, "picked"));
+        Assert.Equal("room-go", engine.ScrollTargetId);
+        Assert.DoesNotContain(sent, item => item.Address == "/bottom");
+
+        engine.ReceiveOsc(new OscMessage { Address = "/scene/home" });
+        Assert.Equal("home", engine.Current.Id);
+        Assert.Equal("top", engine.ScrollTargetId);
+        sent.Clear();
+        engine.ReceiveOsc(new OscMessage { Address = "/intuime/scroll", Number = 1.2 });
+        Assert.Equal("middle", engine.ScrollTargetId);
+        engine.PressScrollTarget(0, fromOsc: false);
+        Assert.Equal("middle", TextTemplates.Get(engine.Live, "picked"));
+        Assert.Contains(sent, item => item.Address == "/middle" && item.Number == 1);
     }
 
     [Fact]
