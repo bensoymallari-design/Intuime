@@ -36,6 +36,9 @@ public sealed class PlayerWindow : Window
     private string _openPageUrl = "";
     private string? _queuedUrl;
     private bool _playerReady;
+    private readonly record struct PageBox(double X, double Y, double Width, double Height);
+    private PageBox? _pageBox;
+    private PageBox? _queuedBox;
     private readonly SceneSurface _pageButtons = new();
     private readonly LayoutTransformControl _pageButtonsHost = new()
     {
@@ -142,6 +145,8 @@ public sealed class PlayerWindow : Window
             _fade = 0;
             _status.IsVisible = false;
             _queuedUrl = null;
+            _queuedBox = null;
+            _pageBox = null;
             _openPageUrl = "";
             _page.HidePage();
             _pageButtonsHost.IsVisible = false;
@@ -152,6 +157,7 @@ public sealed class PlayerWindow : Window
             _surface.Rebuild();
             CreateHosts();
             LayoutVideos();
+            ShowBackgroundLink();
         };
         _engine.Changed += () =>
         {
@@ -604,17 +610,27 @@ public sealed class PlayerWindow : Window
         }
 
         var scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
-        var width = Math.Max(1, _engine.Live.Width * scale);
-        var height = Math.Max(1, _engine.Live.Height * scale);
-        var originX = Math.Max(0, (Bounds.Width - width) / 2);
-        var originY = Math.Max(0, (Bounds.Height - height) / 2);
-        _page.Fit(width, height);
+        var sceneWidth = Math.Max(1, _engine.Live.Width);
+        var sceneHeight = Math.Max(1, _engine.Live.Height);
+        var box = _pageBox ?? new PageBox(0, 0, sceneWidth, sceneHeight);
+        var scenePixelsW = Math.Max(1, sceneWidth * scale);
+        var scenePixelsH = Math.Max(1, sceneHeight * scale);
+        var sceneX = Math.Max(0, (Bounds.Width - scenePixelsW) / 2);
+        var sceneY = Math.Max(0, (Bounds.Height - scenePixelsH) / 2);
+        var pageX = sceneX + box.X * scale;
+        var pageY = sceneY + box.Y * scale;
+        var pageW = Math.Max(1, box.Width * scale);
+        var pageH = Math.Max(1, box.Height * scale);
+        _page.HorizontalAlignment = HorizontalAlignment.Left;
+        _page.VerticalAlignment = VerticalAlignment.Top;
+        _page.Margin = new Thickness(pageX, pageY, 0, 0);
+        _page.Fit(pageW, pageH);
         if (_pageButtonsHost.IsVisible)
-            _pageButtons.MoveOverlay(0, 0, _engine.Live.Width, _engine.Live.Height);
+            _pageButtons.MoveOverlay(0, 0, sceneWidth, sceneHeight);
         var buttons = _buttonsWindow?.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
         if (!_page.DrawsInTheWindow)
-            LinuxWebFrame.Show(handle, (int)originX, (int)originY, (int)width, (int)height, buttons);
-        PlacePageButtons(originX, originY, width, height);
+            LinuxWebFrame.Show(handle, (int)pageX, (int)pageY, (int)pageW, (int)pageH, buttons);
+        PlacePageButtons(sceneX, sceneY, scenePixelsW, scenePixelsH);
     }
 
     private void PlacePageButtons(double originX, double originY, double width, double height)
@@ -939,6 +955,8 @@ public sealed class PlayerWindow : Window
     private void OnPageFailed(string message)
     {
         _queuedUrl = null;
+        _queuedBox = null;
+        _pageBox = null;
         _openPageUrl = "";
         _pageButtonsHost.IsVisible = false;
         if (_buttonsWindow?.IsVisible == true)
@@ -947,11 +965,26 @@ public sealed class PlayerWindow : Window
         ShowStatus(message);
     }
 
-    private void OpenUrl(string url)
+    private void ShowBackgroundLink()
+    {
+        var scene = Shown;
+        if (scene == null)
+            return;
+        var layer = BackgroundLayers.FrontLink(scene);
+        if (layer == null)
+            return;
+        var box = layer.Box(_engine.Live.Width, _engine.Live.Height);
+        QueuePage(layer.Source, new PageBox(box.X, box.Y, box.Width, box.Height));
+    }
+
+    private void OpenUrl(string url) => QueuePage(url, null);
+
+    private void QueuePage(string url, PageBox? box)
     {
         if (string.IsNullOrWhiteSpace(url))
             return;
         _queuedUrl = url;
+        _queuedBox = box;
         if (!_playerReady)
             return;
         var snapshot = url;
@@ -959,7 +992,10 @@ public sealed class PlayerWindow : Window
         {
             if (!string.Equals(_queuedUrl, snapshot, StringComparison.Ordinal))
                 return;
+            var queued = _queuedBox;
             _queuedUrl = null;
+            _queuedBox = null;
+            _pageBox = queued;
             OpenUrlNow(snapshot);
         });
     }
@@ -969,7 +1005,9 @@ public sealed class PlayerWindow : Window
         var url = _queuedUrl;
         if (string.IsNullOrWhiteSpace(url))
             return;
+        _pageBox = _queuedBox;
         _queuedUrl = null;
+        _queuedBox = null;
         OpenUrlNow(url);
     }
 

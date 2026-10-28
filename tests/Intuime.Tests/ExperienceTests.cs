@@ -1040,6 +1040,24 @@ public class ExperienceTests
         Assert.Equal("Starfield", saved.Name);
         Assert.False(saved.Video);
 
+        var link = BackgroundLayers.AddLink(scene, "example.com");
+        var picture = BackgroundLayers.Add(scene, video: false, "assets/logo.png");
+        Assert.True(link.Link);
+        Assert.False(picture.Link);
+        Assert.Equal("Web page", link.Name);
+        Assert.Equal("example.com", link.Source);
+        Assert.True(link.Fill);
+        Assert.Equal((0d, 0d, 1920d, 1080d), link.Box(1920, 1080));
+        Assert.Equal(link.Id, BackgroundLayers.FrontLink(scene)?.Id);
+        BackgroundLayers.AddLink(scene, "https://intuime.test");
+        Assert.Equal("https://intuime.test", BackgroundLayers.FrontLink(scene)?.Source);
+        var linked = ProjectStore.Clone(new ExperienceDocument { Scenes = { scene } }).Scenes.Single();
+        Assert.Equal(4, linked.Backgrounds.Count);
+        Assert.False(linked.Backgrounds[0].Link);
+        Assert.True(linked.Backgrounds[1].Link);
+        Assert.False(linked.Backgrounds[2].Link);
+        Assert.Equal("https://intuime.test", linked.Backgrounds[3].Source);
+
         saved.BuiltIn = "missing/nope";
         var repaired = ProjectStore.Clone(new ExperienceDocument { Scenes = { clone } }).Scenes.Single();
         Assert.Equal("", repaired.Backgrounds.Single().BuiltIn);
@@ -1060,6 +1078,7 @@ public class ExperienceTests
         """;
         var loaded = ProjectStore.Deserialize(old).Scenes.Single();
         Assert.Equal("", loaded.Backgrounds.Single().BuiltIn);
+        Assert.False(loaded.Backgrounds.Single().Link);
         Assert.Equal("assets/a.png", loaded.Backgrounds.Single().Source);
     }
 

@@ -306,7 +306,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         {
             var layer = scene.Backgrounds[index];
             var box = layer.Box(size.Width, size.Height);
-            signature += $"|{index}:{layer.Id}:{layer.BuiltIn}:{layer.Source}:{layer.Video}:{layer.HasCustomSize}:{box.X}:{box.Y}:{box.Width}:{box.Height}";
+            signature += $"|{index}:{layer.Id}:{layer.BuiltIn}:{layer.Source}:{layer.Video}:{layer.Link}:{layer.HasCustomSize}:{box.X}:{box.Y}:{box.Width}:{box.Height}";
         }
         if (signature == _backgroundSignature)
             return;
@@ -316,10 +316,10 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         {
             var layer = scene.Backgrounds[index];
             var included = _backgroundInclude != null ? _backgroundInclude(layer) : !_clearPage;
-            var drawImage = !layer.Video && !layer.IsBuiltIn && included;
+            var drawImage = !layer.Video && !layer.IsBuiltIn && !layer.Link && included;
             var drawMotion = layer.IsBuiltIn && included;
             var drawFrame = _design && _backgroundInclude == null && !_clearPage
-                && (layer.Video || layer.HasCustomSize || scene.Backgrounds.Count > 1);
+                && (layer.Video || layer.Link || layer.HasCustomSize || scene.Backgrounds.Count > 1);
             if (!drawImage && !drawMotion && !drawFrame)
                 continue;
             var box = layer.Box(size.Width, size.Height);
@@ -351,10 +351,12 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             }
             if (!drawFrame)
                 continue;
-            var file = layer.IsBuiltIn
-                ? BuiltInBackgrounds.Find(layer.BuiltIn)?.Name ?? layer.Name
-                : string.IsNullOrWhiteSpace(layer.Source) ? layer.Name : System.IO.Path.GetFileName(layer.Source);
-            var label = "Layer " + (index + 1) + (layer.Video ? "  ·  " + file + "  ·  press Play" : "  ·  " + file);
+            var file = layer.Link
+                ? string.IsNullOrWhiteSpace(layer.Source) ? "Web page" : layer.Source
+                : layer.IsBuiltIn
+                    ? BuiltInBackgrounds.Find(layer.BuiltIn)?.Name ?? layer.Name
+                    : string.IsNullOrWhiteSpace(layer.Source) ? layer.Name : System.IO.Path.GetFileName(layer.Source);
+            var label = "Layer " + (index + 1) + (layer.Video || layer.Link ? "  ·  " + file + "  ·  press Play" : "  ·  " + file);
             var frame = new Border
             {
                 IsHitTestVisible = false,
@@ -369,10 +371,17 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                     Padding = new Thickness(14, 8),
                     CornerRadius = new CornerRadius(10),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Bottom,
+                    VerticalAlignment = layer.Link ? VerticalAlignment.Top : VerticalAlignment.Bottom,
                     Margin = new Thickness(16),
                     IsHitTestVisible = false,
-                    Child = new TextBlock { Text = label, Foreground = Brushes.White, FontSize = 18 }
+                    Child = new TextBlock
+                    {
+                        Text = label,
+                        Foreground = Brushes.White,
+                        FontSize = 18,
+                        TextWrapping = TextWrapping.Wrap,
+                        MaxWidth = Math.Max(160, box.Width - 60)
+                    }
                 }
             };
             Canvas.SetLeft(frame, box.X - _originX);
