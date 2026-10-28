@@ -100,7 +100,7 @@ sealed class SiteWindow : IDisposable
             yield return "-profile";
             yield return profile;
             yield return "-no-remote";
-            yield return "-kiosk";
+            yield return "-new-window";
             yield return url;
             yield break;
         }
@@ -111,7 +111,6 @@ sealed class SiteWindow : IDisposable
         yield return "--new-window";
         yield return "--window-position=" + bounds.X + "," + bounds.Y;
         yield return "--window-size=" + width + "," + height;
-        yield return "--start-fullscreen";
         yield return "--app=" + url;
     }
 

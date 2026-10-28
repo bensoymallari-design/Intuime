@@ -44,7 +44,6 @@ public sealed class PlayerWindow : Window
     private SiteWindow? _site;
     private Window? _sceneBack;
     private bool _closingSite;
-    private int _backLift;
     private readonly SceneSurface _pageButtons = new();
     private readonly LayoutTransformControl _pageButtonsHost = new()
     {
@@ -180,12 +179,13 @@ public sealed class PlayerWindow : Window
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += (_, _) =>
         {
-            if (_backLift > 0 && _sceneBack != null)
+            if (_site != null && _sceneBack != null)
             {
                 var bounds = SiteBounds();
                 _sceneBack.Position = new PixelPoint(bounds.X + 24, bounds.Y + 24);
                 _sceneBack.Topmost = true;
-                _backLift--;
+                var handle = _sceneBack.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+                LinuxWebFrame.KeepAbove(handle);
             }
             if (_ownsClock)
                 _engine.Tick();
@@ -1070,7 +1070,6 @@ public sealed class PlayerWindow : Window
         _sceneBack.Topmost = true;
         if (!_sceneBack.IsVisible)
             _sceneBack.Show();
-        _backLift = 30;
     }
 
     private Window BuildSceneBack()
@@ -1136,7 +1135,6 @@ public sealed class PlayerWindow : Window
             _returnSceneId = null;
             _queuedUrl = null;
             _queuedReturn = null;
-            _backLift = 0;
             var site = _site;
             _site = null;
             try
