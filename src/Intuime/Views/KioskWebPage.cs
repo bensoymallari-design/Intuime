@@ -1,4 +1,7 @@
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Intuime.Core;
@@ -13,6 +16,9 @@ public sealed class KioskWebPage : Grid
     private NativeWebView? _view;
     private int _showToken;
     private bool _opening;
+    private bool _broken;
+    private string _brokenMessage = "";
+    private int _closing;
 
     public event Action<string>? Failed;
 
@@ -26,7 +32,32 @@ public sealed class KioskWebPage : Grid
         VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center;
         Background = Avalonia.Media.Brushes.Black;
         Pages.Add(this);
-        HookGuard();
+        InstallGuard();
+    }
+
+    public static void InstallGuard()
+    {
+        if (_guardHooked)
+            return;
+        _guardHooked = true;
+        Dispatcher.UIThread.UnhandledException += (_, args) =>
+        {
+            if (!WebViewFaults.IsWebFault(args.Exception, PageIsOpen))
+                return;
+            args.Handled = true;
+            if (WebViewFaults.IsFocusGlitch(args.Exception))
+                return;
+            ScheduleClose(Explain(args.Exception));
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            if (!WebViewFaults.IsWebFault(args.Exception, PageIsOpen))
+                return;
+            args.SetObserved();
+            if (WebViewFaults.IsFocusGlitch(args.Exception))
+                return;
+            ScheduleClose(Explain(args.Exception));
+        };
     }
 
     public void Release() => Pages.Remove(this);
@@ -51,8 +82,18 @@ public sealed class KioskWebPage : Grid
 
         try
         {
+            _broken = false;
+            _brokenMessage = "";
             _opening = true;
             Ensure();
+            if (_broken)
+            {
+                error = string.IsNullOrWhiteSpace(_brokenMessage)
+                    ? "That page could not open inside the kiosk. Intuime stayed open."
+                    : _brokenMessage;
+                Abandon();
+                return false;
+            }
             error = "";
             var token = ++_showToken;
             IsVisible = true;
@@ -60,14 +101,28 @@ public sealed class KioskWebPage : Grid
             _view!.NavigationCompleted += OnCompleted;
             void OnCompleted(object? sender, WebViewNavigationCompletedEventArgs e)
             {
-                if (_view != null)
-                    _view.NavigationCompleted -= OnCompleted;
-                if (!IsVisible || token != _showToken || e.IsSuccess)
+                var view = _view;
+                if (view != null)
+                    view.NavigationCompleted -= OnCompleted;
+                if (view == null || !IsVisible || token != _showToken)
                     return;
-                Failed?.Invoke("That page did not open inside the kiosk.");
+                if (!e.IsSuccess)
+                {
+                    Failed?.Invoke("That page did not open inside the kiosk.");
+                    return;
+                }
+                // The native page rejects focus until it has finished opening. Asking earlier kills the app on Windows.
+                view.Focusable = true;
+                try
+                {
+                    view.Focus();
+                }
+                catch (Exception ex)
+                {
+                    Survive(ex, closePage: false);
+                }
             }
             _view.Source = new Uri(url);
-            _view.Focus();
             return true;
         }
         catch (Exception ex)
@@ -82,6 +137,7 @@ public sealed class KioskWebPage : Grid
     {
         _showToken++;
         _opening = false;
+        _broken = false;
         IsVisible = false;
         IsHitTestVisible = false;
         if (_view == null)
@@ -100,8 +156,9 @@ public sealed class KioskWebPage : Grid
         if (_view != null)
             return;
 
-        var view = new NativeWebView
+        var view = new SafeWebView(this)
         {
+            Focusable = false,
             HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch,
             VerticalAlignment = Avalonia.Layout.VerticalAlignment.Stretch
         };
@@ -134,28 +191,51 @@ public sealed class KioskWebPage : Grid
         Children.Add(view);
     }
 
-    private static void HookGuard()
+    private void Survive(Exception ex, bool closePage)
     {
-        if (_guardHooked)
+        if (!closePage || !WebViewFaults.IsWebFault(ex, pageOpen: true))
             return;
-        _guardHooked = true;
-        Dispatcher.UIThread.UnhandledException += (_, args) =>
+        _broken = true;
+        _brokenMessage = Explain(ex);
+        ScheduleClose(_brokenMessage);
+    }
+
+    private static bool PageIsOpen => Pages.Exists(page => page._opening || page._view != null);
+
+    private static void ScheduleClose(string message)
+    {
+        try
         {
-            if (!IsWebFault(args.Exception))
-                return;
-            args.Handled = true;
-            var message = Explain(args.Exception);
-            foreach (var page in Pages.ToArray())
-                page.Fail(message);
-        };
+            Dispatcher.UIThread.Post(() =>
+            {
+                foreach (var page in Pages.ToArray())
+                    page.Fail(message);
+            });
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private void Fail(string message)
     {
+        if (_closing > 0)
+            return;
         if (!_opening && _view == null)
             return;
-        Abandon();
-        Failed?.Invoke(message);
+        _closing++;
+        try
+        {
+            Abandon();
+            Failed?.Invoke(message);
+        }
+        catch (Exception)
+        {
+        }
+        finally
+        {
+            _closing--;
+        }
     }
 
     private void Abandon()
@@ -177,20 +257,6 @@ public sealed class KioskWebPage : Grid
         }
     }
 
-    private static bool IsWebFault(Exception exception)
-    {
-        for (var current = exception; current != null; current = current.InnerException)
-        {
-            var text = current.GetType().FullName + " " + current.Message + " " + current.StackTrace;
-            if (text.Contains("NativeWebView", StringComparison.Ordinal) ||
-                text.Contains("WebView", StringComparison.Ordinal) ||
-                text.Contains("webkit", StringComparison.OrdinalIgnoreCase) ||
-                text.Contains("WebKit", StringComparison.Ordinal))
-                return true;
-        }
-        return false;
-    }
-
     private static string Explain(Exception exception)
     {
         var missing = false;
@@ -208,5 +274,52 @@ public sealed class KioskWebPage : Grid
         return missing
             ? "The web viewer is missing on this computer, so the page stayed closed."
             : "That page could not open inside the kiosk. Intuime stayed open.";
+    }
+
+    /// <summary>
+    /// WebView2 throws from the window focus handler, which Avalonia does not catch.
+    /// Swallowing it here is what keeps Play open when a scene shows a link.
+    /// </summary>
+    private sealed class SafeWebView : NativeWebView
+    {
+        private readonly KioskWebPage _page;
+
+        public SafeWebView(KioskWebPage page) => _page = page;
+
+        protected override void OnGotFocus(GotFocusEventArgs e)
+        {
+            try
+            {
+                base.OnGotFocus(e);
+            }
+            catch (Exception ex)
+            {
+                _page.Survive(ex, closePage: false);
+            }
+        }
+
+        protected override void OnLostFocus(RoutedEventArgs e)
+        {
+            try
+            {
+                base.OnLostFocus(e);
+            }
+            catch (Exception ex)
+            {
+                _page.Survive(ex, closePage: false);
+            }
+        }
+
+        protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+        {
+            try
+            {
+                base.OnAttachedToVisualTree(e);
+            }
+            catch (Exception ex)
+            {
+                _page.Survive(ex, closePage: true);
+            }
+        }
     }
 }
