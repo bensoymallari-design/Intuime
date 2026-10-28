@@ -39,6 +39,12 @@ public sealed class PlayerWindow : Window
     private readonly record struct PageBox(double X, double Y, double Width, double Height);
     private PageBox? _pageBox;
     private PageBox? _queuedBox;
+    private string? _queuedReturn;
+    private string? _returnSceneId;
+    private SiteWindow? _site;
+    private Window? _sceneBack;
+    private bool _closingSite;
+    private int _backLift;
     private readonly SceneSurface _pageButtons = new();
     private readonly LayoutTransformControl _pageButtonsHost = new()
     {
@@ -142,6 +148,7 @@ public sealed class PlayerWindow : Window
         {
             if (changed != _screen)
                 return;
+            CloseSite(goBack: false);
             _fade = 0;
             _status.IsVisible = false;
             _queuedUrl = null;
@@ -173,6 +180,13 @@ public sealed class PlayerWindow : Window
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += (_, _) =>
         {
+            if (_backLift > 0 && _sceneBack != null)
+            {
+                var bounds = SiteBounds();
+                _sceneBack.Position = new PixelPoint(bounds.X + 24, bounds.Y + 24);
+                _sceneBack.Topmost = true;
+                _backLift--;
+            }
             if (_ownsClock)
                 _engine.Tick();
             _fade = Math.Min(1, _fade + 0.1);
@@ -215,6 +229,8 @@ public sealed class PlayerWindow : Window
         Closed += (_, _) =>
         {
             _timer.Stop();
+            CloseSite(goBack: false);
+            _sceneBack?.Close();
             _osc?.Dispose();
             if (_buttonsWindow != null)
                 _buttonsWindow.Close();
@@ -978,20 +994,26 @@ public sealed class PlayerWindow : Window
         if (layer == null)
             return;
         var box = layer.Box(_engine.Live.Width, _engine.Live.Height);
-        QueuePage(layer.Source, new PageBox(box.X, box.Y, box.Width, box.Height));
+        QueuePage(layer.Source, new PageBox(box.X, box.Y, box.Width, box.Height), _engine.CameFromSceneId);
     }
 
-    private void OpenUrl(string url) => QueuePage(url, null);
+    private void OpenUrl(string url)
+    {
+        var back = _engine.IsOpeningFromSceneEnter ? _engine.CameFromSceneId : null;
+        QueuePage(url, null, back);
+    }
 
-    private void QueuePage(string url, PageBox? box)
+    private void QueuePage(string url, PageBox? box, string? returnSceneId)
     {
         if (string.IsNullOrWhiteSpace(url))
             return;
         _queuedUrl = url;
         _queuedBox = box;
+        _queuedReturn = returnSceneId;
         if (!_playerReady)
             return;
         var snapshot = url;
+        var back = returnSceneId;
         Dispatcher.UIThread.Post(() =>
         {
             if (!string.Equals(_queuedUrl, snapshot, StringComparison.Ordinal))
@@ -999,35 +1021,152 @@ public sealed class PlayerWindow : Window
             var queued = _queuedBox;
             _queuedUrl = null;
             _queuedBox = null;
+            _queuedReturn = null;
             _pageBox = queued;
-            OpenUrlNow(snapshot);
+            OpenUrlNow(snapshot, back);
         });
     }
 
     private void FlushQueuedPage()
     {
         var url = _queuedUrl;
+        var back = _queuedReturn;
         if (string.IsNullOrWhiteSpace(url))
             return;
         _pageBox = _queuedBox;
         _queuedUrl = null;
         _queuedBox = null;
-        OpenUrlNow(url);
+        _queuedReturn = null;
+        OpenUrlNow(url, back);
     }
 
-    private void OpenUrlNow(string url)
+    private void OpenUrlNow(string url, string? returnSceneId)
     {
-        if (!_page.TryShow(url, out var error))
+        // The embedded page was still closing Intuime on Windows. A separate window cannot take the app down.
+        CloseSite(goBack: false);
+        if (!WebAddresses.TryNormalize(url, out var normalized))
+        {
+            ShowStatus("Use a web address, like https://example.com.");
+            return;
+        }
+        if (!SiteWindow.TryOpen(normalized, SiteBounds(), out var site, out var error))
         {
             ShowStatus(error);
             return;
         }
 
+        _site = site;
+        _returnSceneId = string.IsNullOrEmpty(returnSceneId) ? null : returnSceneId;
         _status.IsVisible = false;
         _hint.IsVisible = false;
-        _openPageUrl = url;
-        ShowPageButtons(url);
-        LayoutPage();
+        ShowSceneBack();
+    }
+
+    private void ShowSceneBack()
+    {
+        _sceneBack ??= BuildSceneBack();
+        var bounds = SiteBounds();
+        _sceneBack.Position = new PixelPoint(bounds.X + 24, bounds.Y + 24);
+        _sceneBack.Topmost = true;
+        if (!_sceneBack.IsVisible)
+            _sceneBack.Show();
+        _backLift = 30;
+    }
+
+    private Window BuildSceneBack()
+    {
+        var window = new Window
+        {
+            Title = "Back",
+            Width = 148,
+            Height = 56,
+            CanResize = false,
+            SystemDecorations = SystemDecorations.None,
+            ShowInTaskbar = false,
+            Topmost = true,
+            Background = Brushes.Transparent,
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            ShowActivated = false
+        };
+        var button = new Button
+        {
+            Content = "Back",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = Painting.Brush("#E7A23A"),
+            Foreground = Painting.Brush("#1B2330"),
+            FontSize = 20,
+            FontWeight = FontWeight.SemiBold,
+            CornerRadius = new CornerRadius(16)
+        };
+        button.Click += (_, _) => ReturnFromSite();
+        window.Content = button;
+        window.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape)
+                return;
+            ReturnFromSite();
+            e.Handled = true;
+        };
+        return window;
+    }
+
+    private void ReturnFromSite()
+    {
+        CloseSite(goBack: true);
+        try
+        {
+            Activate();
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private void CloseSite(bool goBack)
+    {
+        if (_closingSite)
+            return;
+        _closingSite = true;
+        try
+        {
+            var back = _returnSceneId;
+            _returnSceneId = null;
+            _queuedUrl = null;
+            _queuedReturn = null;
+            _backLift = 0;
+            var site = _site;
+            _site = null;
+            try
+            {
+                site?.Dispose();
+            }
+            catch (Exception)
+            {
+            }
+            if (_sceneBack?.IsVisible == true)
+                _sceneBack.Hide();
+            if (!goBack || string.IsNullOrEmpty(back) || _engine.SceneFor(_screen)?.Id == back)
+                return;
+            _engine.RunExternal(new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = back });
+        }
+        finally
+        {
+            _closingSite = false;
+        }
+    }
+
+    private PixelRect SiteBounds()
+    {
+        if (_monitor != null && _monitor.Bounds.Width > 0)
+            return _monitor.Bounds;
+        var screen = Screens?.ScreenFromVisual(this);
+        if (screen != null && screen.Bounds.Width > 0)
+            return screen.Bounds;
+        var point = this.PointToScreen(new Point(0, 0));
+        return new PixelRect(point.X, point.Y, (int)Math.Max(1, Bounds.Width), (int)Math.Max(1, Bounds.Height));
     }
 
     private void ShowPageButtons(string url)

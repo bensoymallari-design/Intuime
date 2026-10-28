@@ -33,6 +33,11 @@ public sealed class PlaybackEngine
     public Scene? Current => SceneFor(_focusScreen);
     public string? ScrollTargetId { get; private set; }
 
+    /// <summary>The scene that was showing before the latest scene change. Back uses this to return from a web page.</summary>
+    public string? CameFromSceneId { get; private set; }
+
+    public bool IsOpeningFromSceneEnter { get; private set; }
+
     public Scene? SceneFor(int screen) =>
         _showing.TryGetValue(screen, out var id) ? Live.Scenes.FirstOrDefault(sceneItem => sceneItem.Id == id) : null;
 
@@ -371,6 +376,8 @@ public sealed class PlaybackEngine
         _sequences.RemoveAll(item => item.Screen == screen);
         DropMotion(retired);
         BeginEntrances(destination);
+        if (leaving != null && !string.Equals(leaving.Id, sceneId, StringComparison.Ordinal))
+            CameFromSceneId = leaving.Id;
         SceneJustRaised = true;
         ScreenChanged?.Invoke(screen);
         SceneChanged?.Invoke();
@@ -384,7 +391,15 @@ public sealed class PlaybackEngine
             MediaCommand?.Invoke(new MediaRequest(element.Id, MediaTransport.Play));
         }
 
-        Run(destination.Interactions, TriggerKind.SceneEnter, null, null);
+        IsOpeningFromSceneEnter = true;
+        try
+        {
+            Run(destination.Interactions, TriggerKind.SceneEnter, null, null);
+        }
+        finally
+        {
+            IsOpeningFromSceneEnter = false;
+        }
         if (SceneFor(screen)?.Id == sceneId)
         {
             ScrollTargetId = ScrollChoices().FirstOrDefault()?.Id;
