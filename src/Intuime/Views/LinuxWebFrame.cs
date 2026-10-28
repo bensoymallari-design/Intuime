@@ -83,6 +83,17 @@ static class LinuxWebFrame
         XFlush(display);
     }
 
+    public static void KeepAbove(IntPtr window)
+    {
+        if (!OperatingSystem.IsLinux() || window == IntPtr.Zero)
+            return;
+        var display = Display();
+        if (display == IntPtr.Zero)
+            return;
+        XRaiseWindow(display, window);
+        XFlush(display);
+    }
+
     public static void Hide()
     {
         if (!OperatingSystem.IsLinux() || Owned.Count == 0)
