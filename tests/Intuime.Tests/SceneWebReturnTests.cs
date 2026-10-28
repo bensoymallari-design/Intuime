@@ -77,4 +77,22 @@ public class SceneWebReturnTests
         Assert.False(openedDuringEnter);
         Assert.Equal("site", openedFrom);
     }
+
+    [Fact]
+    public void A_button_or_icon_replaces_the_corner_arrow()
+    {
+        var plain = new Scene
+        {
+            Id = "plain",
+            Elements = { new SceneElement { Id = "title", Kind = ElementKind.Text, IsVisible = true } }
+        };
+        Assert.False(SiteControls.HasOwn(plain));
+
+        plain.Elements.Add(new SceneElement { Id = "back", Kind = ElementKind.Icon, IsVisible = true });
+        Assert.True(SiteControls.HasOwn(plain));
+
+        var hidden = new SceneElement { Id = "hidden", Kind = ElementKind.Button, IsVisible = false };
+        Assert.False(SiteControls.IsOwn(hidden));
+        Assert.True(SiteControls.IsOwn(new SceneElement { Id = "go", Kind = ElementKind.Button, IsVisible = true }));
+    }
 }

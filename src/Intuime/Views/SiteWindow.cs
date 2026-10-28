@@ -151,6 +151,48 @@ sealed class SiteWindow : IDisposable
         }
     }
 
+    internal static void ClipTo(IntPtr window, IReadOnlyList<(int X, int Y, int Width, int Height)> rectangles)
+    {
+        if (window == IntPtr.Zero || rectangles.Count == 0)
+            return;
+        if (OperatingSystem.IsLinux())
+        {
+            LinuxWebFrame.ShapeTo(window, rectangles);
+            return;
+        }
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        IntPtr combined = IntPtr.Zero;
+        foreach (var rect in rectangles)
+        {
+            var piece = CreateRectRgn(rect.X, rect.Y, rect.X + Math.Max(1, rect.Width), rect.Y + Math.Max(1, rect.Height));
+            if (combined == IntPtr.Zero)
+            {
+                combined = piece;
+                continue;
+            }
+            var next = CreateRectRgn(0, 0, 0, 0);
+            CombineRgn(next, combined, piece, 2);
+            DeleteObject(combined);
+            DeleteObject(piece);
+            combined = next;
+        }
+        SetWindowRgn(window, combined, true);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern int CombineRgn(IntPtr destination, IntPtr sourceA, IntPtr sourceB, int mode);
+
+    [System.Runtime.InteropServices.DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(IntPtr obj);
+
     private static string? FindOnPath(string name)
     {
         var path = Environment.GetEnvironmentVariable("PATH");
