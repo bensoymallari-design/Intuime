@@ -184,7 +184,10 @@ public sealed class PlayerWindow : Window
         _timer.Tick += (_, _) =>
         {
             if (_site != null)
+            {
                 PlaceSiteChrome();
+                _site.HoldOpen(SiteBounds());
+            }
             if (_ownsClock)
                 _engine.Tick();
             _fade = Math.Min(1, _fade + 0.1);
