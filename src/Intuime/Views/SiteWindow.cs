@@ -1,10 +1,12 @@
 using System.Diagnostics;
 using Avalonia;
+using Intuime.Core;
 
 namespace Intuime.Views;
 
 /// <summary>
-/// Opens a site in its own browser window. The embedded viewer was closing the whole app on Windows.
+/// Opens a site in a locked browser window. There is no close, minimize, or maximize.
+/// The embedded viewer was closing the whole app on Windows, so the page stays in its own process.
 /// </summary>
 sealed class SiteWindow : IDisposable
 {
@@ -90,28 +92,19 @@ sealed class SiteWindow : IDisposable
         }
     }
 
-    private static IEnumerable<string> Arguments(string browser, string url, string profile, PixelRect bounds)
-    {
-        var name = Path.GetFileName(browser);
-        var width = Math.Max(1, bounds.Width);
-        var height = Math.Max(1, bounds.Height);
-        if (name.Contains("firefox", StringComparison.OrdinalIgnoreCase))
-        {
-            yield return "-profile";
-            yield return profile;
-            yield return "-no-remote";
-            yield return "-new-window";
-            yield return url;
-            yield break;
-        }
+    private static IEnumerable<string> Arguments(string browser, string url, string profile, PixelRect bounds) =>
+        SiteLaunch.Arguments(Path.GetFileName(browser), url, profile, bounds.X, bounds.Y, bounds.Width, bounds.Height);
 
-        yield return "--user-data-dir=" + profile;
-        yield return "--no-first-run";
-        yield return "--no-default-browser-check";
-        yield return "--new-window";
-        yield return "--window-position=" + bounds.X + "," + bounds.Y;
-        yield return "--window-size=" + width + "," + height;
-        yield return "--app=" + url;
+    internal static void KeepAbove(IntPtr window)
+    {
+        if (window == IntPtr.Zero)
+            return;
+        if (OperatingSystem.IsWindows())
+        {
+            SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+            return;
+        }
+        LinuxWebFrame.KeepAbove(window);
     }
 
     private static string? FindBrowser()
@@ -180,6 +173,9 @@ sealed class SiteWindow : IDisposable
         }
         SetWindowRgn(window, combined, true);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);

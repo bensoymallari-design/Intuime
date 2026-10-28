@@ -177,7 +177,7 @@ public sealed class InspectorPanel : StackPanel
         if (element.Kind == ElementKind.WebLink)
         {
             Text("URL", element.Url, value => element.Url = value);
-            Note("In Play, tapping this opens the site in its own window. A black arrow in the corner brings you back. Add a button or icon on the scene to use your own instead. You can change its look and add effects, then set it to go to a scene.");
+            Note("In Play, tapping this opens the site with no close, minimize, or maximize button. A black arrow in the corner brings you back. Add a button or icon on the scene to use your own instead. You can change its look and add effects, then set it to go to a scene.");
         }
         if (element.Kind == ElementKind.Clock)
             Text("Format", element.ClockFormat, value => element.ClockFormat = value);
@@ -326,7 +326,7 @@ public sealed class InspectorPanel : StackPanel
     {
         scene.PullLegacyBackground();
         Heading("Backgrounds");
-        Note("Add a picture, a video, a web link, or a built-in motion background. A link opens that site in its own window when the scene starts. A black arrow in the corner returns to the scene you came from. Add a button or icon on the scene to use your own instead, with your own look and effects. Built-in designs stay sharp at the experience size and repeat without a jump. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it.");
+        Note("Add a picture, a video, a web link, or a built-in motion background. A link opens that site with no close, minimize, or maximize button when the scene starts. A black arrow in the corner returns to the scene you came from. Add a button or icon on the scene to use your own instead, with your own look and effects. Built-in designs stay sharp at the experience size and repeat without a jump. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it.");
         var fourK = new Button { Content = "Make the experience 4K", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
         fourK.Click += (_, _) =>
         {
@@ -416,7 +416,7 @@ public sealed class InspectorPanel : StackPanel
                 card.Children.Add(LayerText("Web address", layer.Source, value => layer.Source = value.Trim()));
                 card.Children.Add(new TextBlock
                 {
-                    Text = "In Play this address opens by itself in a window. A black arrow in the corner closes the site and returns to the scene you came from. Add a button or an icon on this scene to use your own. Style it, add effects, and set Go to scene if it should leave.",
+                    Text = "In Play this address opens by itself, with no close, minimize, or maximize button. A black arrow in the corner closes the site and returns to the scene you came from. Add a button or an icon on this scene to use your own. Style it, add effects, and set Go to scene if it should leave.",
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = Painting.Brush(Painting.Muted),
                     FontSize = 12
@@ -748,7 +748,7 @@ public sealed class InspectorPanel : StackPanel
             panel.Children.Add(TextControl("URL", action.Text, value => action.Text = value));
             panel.Children.Add(new TextBlock
             {
-                Text = "This opens the site in a window. A black arrow in the corner returns to the scene you came from. Add a button or icon on the scene to use your own look and effects instead.",
+                Text = "This opens the site with no close, minimize, or maximize button. A black arrow in the corner returns to the scene you came from. Add a button or icon on the scene to use your own look and effects instead.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Painting.Brush(Painting.Muted),
                 FontSize = 12

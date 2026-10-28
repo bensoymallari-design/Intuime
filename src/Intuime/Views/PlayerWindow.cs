@@ -1078,7 +1078,7 @@ public sealed class PlayerWindow : Window
         _ownRegionReady = false;
         _sceneBack ??= BuildSceneBack();
         var bounds = SiteBounds();
-        _sceneBack.Position = new PixelPoint(bounds.X + 20, bounds.Y + 68);
+        _sceneBack.Position = new PixelPoint(bounds.X + 20, bounds.Y + 24);
         _sceneBack.Topmost = true;
         if (!_sceneBack.IsVisible)
             _sceneBack.Show();
@@ -1202,7 +1202,7 @@ public sealed class PlayerWindow : Window
             return;
         window.Topmost = true;
         var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-        LinuxWebFrame.KeepAbove(handle);
+        SiteWindow.KeepAbove(handle);
     }
 
     private Window BuildSceneBack()

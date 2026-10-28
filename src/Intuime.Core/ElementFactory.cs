@@ -11,7 +11,7 @@ public static class ElementFactory
         (ElementKind.Button, "Button", "A labeled tap target"),
         (ElementKind.Hotspot, "Hotspot", "An invisible tap region"),
         (ElementKind.Clock, "Clock", "Live time on the player"),
-        (ElementKind.WebLink, "Web link", "Opens the site, with your button or a black arrow"),
+        (ElementKind.WebLink, "Web link", "Opens the site with no window buttons, and your arrow"),
         (ElementKind.Video, "Video", "Plays a video file in the player"),
         (ElementKind.Audio, "Audio", "Plays a sound on the player"),
         (ElementKind.DataList, "Data list", "Tap a row to set a variable"),

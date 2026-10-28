@@ -95,4 +95,26 @@ public class SceneWebReturnTests
         Assert.False(SiteControls.IsOwn(hidden));
         Assert.True(SiteControls.IsOwn(new SceneElement { Id = "go", Kind = ElementKind.Button, IsVisible = true }));
     }
+
+    [Fact]
+    public void The_site_browser_has_no_window_buttons()
+    {
+        var chrome = SiteLaunch.Arguments("chrome.exe", "https://example.com", @"C:\temp\profile", 10, 20, 800, 600);
+        Assert.Contains("--kiosk", chrome);
+        Assert.Contains("https://example.com", chrome);
+        Assert.DoesNotContain(chrome, arg => arg.StartsWith("--app=", StringComparison.Ordinal));
+        Assert.Contains("--window-position=10,20", chrome);
+        Assert.Contains("--window-size=800,600", chrome);
+
+        var edge = SiteLaunch.Arguments(@"C:\Program Files\Microsoft\Edge\Application\msedge.exe", "https://example.com", "profile", 0, 0, 1920, 1080);
+        Assert.Contains("--kiosk", edge);
+        Assert.Contains("--edge-kiosk-type=fullscreen", edge);
+        Assert.DoesNotContain(edge, arg => arg.StartsWith("--app=", StringComparison.Ordinal));
+        Assert.Equal("https://example.com", edge[^1]);
+
+        var firefox = SiteLaunch.Arguments("firefox", "https://example.com", "profile", 0, 0, 100, 100);
+        Assert.Contains("-kiosk", firefox);
+        Assert.DoesNotContain("-new-window", firefox);
+        Assert.Equal("https://example.com", firefox[^1]);
+    }
 }
