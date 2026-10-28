@@ -19,6 +19,15 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private readonly DesignGrid _grid = new() { IsHitTestVisible = false };
     private readonly Canvas _canvas = new() { Background = Brushes.Transparent };
     private readonly Canvas _marqueeLayer = new() { IsHitTestVisible = false };
+    private readonly Border _scrollRing = new()
+    {
+        IsHitTestVisible = false,
+        IsVisible = false,
+        Background = Brushes.Transparent,
+        BorderBrush = Painting.Brush("#E7A23A"),
+        BorderThickness = new Thickness(6),
+        CornerRadius = new CornerRadius(12)
+    };
     private readonly GuideOverlay _guides = new() { IsHitTestVisible = false };
     private readonly Border _marquee = new()
     {
@@ -65,6 +74,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         root.Children.Add(_marqueeLayer);
         root.Children.Add(_guides);
         _marqueeLayer.Children.Add(_marquee);
+        _marqueeLayer.Children.Add(_scrollRing);
         Content = root;
         ClipToBounds = true;
         _canvas.PointerPressed += OnCanvasPressed;
@@ -275,6 +285,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             _page.Background = Painting.Brush("#101820");
             _background.Children.Clear();
             _backgroundSignature = "";
+            PlaceScrollRing();
             return;
         }
 
@@ -294,6 +305,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             _canvas.Children.Add(CreateNode(element.value).Root);
         }
 
+        PlaceScrollRing();
     }
 
     private void PlaceBackgrounds(Scene scene)
@@ -399,7 +411,10 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
             return;
         var scene = Scene();
         if (scene == null)
+        {
+            PlaceScrollRing();
             return;
+        }
         var shown = scene.Elements.Where(Shown).ToList();
         if (_nodes.Count != shown.Count || shown.Any(element => !_nodes.ContainsKey(element.Id)))
         {
@@ -428,6 +443,37 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                 return;
             }
         }
+
+        PlaceScrollRing();
+    }
+
+    private void PlaceScrollRing()
+    {
+        var id = _design ? null : _engine?.ScrollTargetId;
+        var element = id == null ? null : Lookup(id);
+        if (element == null || !element.IsVisible || !Shown(element))
+        {
+            _scrollRing.IsVisible = false;
+            return;
+        }
+
+        const double pad = 8;
+        var width = Math.Max(8, element.Width);
+        var height = Math.Max(8, element.Height);
+        _scrollRing.Width = width + pad * 2;
+        _scrollRing.Height = height + pad * 2;
+        _scrollRing.CornerRadius = new CornerRadius(Math.Max(12, element.CornerRadius + 4));
+        Canvas.SetLeft(_scrollRing, element.X - _originX - pad);
+        Canvas.SetTop(_scrollRing, element.Y - _originY - pad);
+        var scaleX = Math.Max(0.01, element.EffectScale * element.EffectScaleX);
+        var scaleY = Math.Max(0.01, element.EffectScale * element.EffectScaleY);
+        var motion = new TransformGroup();
+        motion.Children.Add(new ScaleTransform(scaleX, scaleY));
+        motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
+        motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
+        _scrollRing.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
+        _scrollRing.RenderTransform = motion;
+        _scrollRing.IsVisible = true;
     }
 
     private void RefreshTexts()
