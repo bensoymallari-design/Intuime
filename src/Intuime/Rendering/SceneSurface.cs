@@ -371,7 +371,7 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
                     Padding = new Thickness(14, 8),
                     CornerRadius = new CornerRadius(10),
                     HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Bottom,
+                    VerticalAlignment = layer.Link ? VerticalAlignment.Top : VerticalAlignment.Bottom,
                     Margin = new Thickness(16),
                     IsHitTestVisible = false,
                     Child = new TextBlock
