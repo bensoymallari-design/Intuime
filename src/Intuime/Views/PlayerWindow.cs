@@ -229,6 +229,8 @@ public sealed class PlayerWindow : Window
 
     public void PressKey(string key) => _engine.KeyPressed(key, _screen);
 
+    public void PressHighlighted() => _engine.PressScrollTarget(_screen, fromOsc: false);
+
     public void ShowOscProblem()
     {
         if (!string.IsNullOrWhiteSpace(_osc?.Problem))
