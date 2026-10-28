@@ -213,6 +213,7 @@ public sealed class BackgroundLayer
     public string Source { get; set; } = "";
     public string BuiltIn { get; set; } = "";
     public bool Video { get; set; }
+    public bool Link { get; set; }
     public bool Loop { get; set; } = true;
     public bool Sound { get; set; }
     public bool Fill { get; set; } = true;
@@ -274,6 +275,34 @@ public static class BackgroundLayers
         };
         scene.Backgrounds.Add(layer);
         return layer;
+    }
+
+    public static BackgroundLayer AddLink(Scene scene, string? url)
+    {
+        scene.PullLegacyBackground();
+        var layer = new BackgroundLayer
+        {
+            Id = Ids.New(),
+            Name = "Web page",
+            Source = url?.Trim() ?? "",
+            Link = true,
+            Video = false,
+            Fill = true
+        };
+        scene.Backgrounds.Add(layer);
+        return layer;
+    }
+
+    public static BackgroundLayer? FrontLink(Scene scene)
+    {
+        scene.PullLegacyBackground();
+        for (var index = scene.Backgrounds.Count - 1; index >= 0; index--)
+        {
+            var layer = scene.Backgrounds[index];
+            if (layer.Link && !string.IsNullOrWhiteSpace(layer.Source))
+                return layer;
+        }
+        return null;
     }
 
     public static void Move(Scene scene, string id, int direction)
