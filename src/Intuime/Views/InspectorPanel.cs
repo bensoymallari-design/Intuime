@@ -115,7 +115,7 @@ public sealed class InspectorPanel : StackPanel
             Text("Send OSC to", session.Document.OscSendHost, value => session.Document.OscSendHost = value.Trim());
             Number("OSC send port", session.Document.OscSendPort, value => session.Document.OscSendPort = (int)Math.Clamp(value, 0, 65535));
             Note("While Play is open, Intuime listens on the listen port. Point your controller, OSC app, or Arduino at this computer and that port. Buttons send OSC to the computer and port above. 127.0.0.1 is this same computer. Port 0 turns that direction off.");
-            Note("A scroll wheel or a scroll sensor moves an orange outline through the buttons. Send /scroll with 1 for the next button and -1 for the previous one. Send /press with 1 to press the outlined button. The mouse wheel does the same as /scroll, and Enter does the same as /press. A number of 0 does nothing. /intuime/scroll and /intuime/press do the same. Do not use /scroll or /press as one button's own address.");
+            Note("A scroll wheel or a scroll sensor moves an orange outline through the buttons. The outlined button grows a little and the border pulses. Send /scroll with 1 for the next button and -1 for the previous one. Send /press with 1 to press the outlined button. The mouse wheel does the same as /scroll, and Enter does the same as /press. A number of 0 does nothing. /intuime/scroll and /intuime/press do the same. Do not use /scroll or /press as one button's own address.");
             return;
         }
 
@@ -266,6 +266,21 @@ public sealed class InspectorPanel : StackPanel
         panel.Children.Add(new TextBlock
         {
             Text = "Pick a motion. Drag How strong to make it bigger or smaller. The button plays it here, and again when someone taps it in Play.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = Painting.Brush(Painting.Muted),
+            FontSize = 12
+        });
+        var motionNames = new[] { "None" }.Concat(LivingEffects.All).ToArray();
+        var currentMotion = LivingEffects.All.FirstOrDefault(name =>
+            string.Equals(name, element.Motion, StringComparison.OrdinalIgnoreCase)) ?? "None";
+        panel.Children.Add(ChoiceControl("Keep moving", motionNames, currentMotion, value => value, value =>
+        {
+            element.Motion = value == "None" ? "" : value;
+            _session?.Commit();
+        }));
+        panel.Children.Add(new TextBlock
+        {
+            Text = "This keeps moving while the scene is open. Bounce hops. Float drifts up and down. Breathe grows and shrinks. Sway rocks. Tilt leans like a card. Wave runs a light around the edge. Wobble leans and twists. How strong changes this motion too.",
             TextWrapping = TextWrapping.Wrap,
             Foreground = Painting.Brush(Painting.Muted),
             FontSize = 12

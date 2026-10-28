@@ -364,6 +364,7 @@ public sealed class SceneElement
     public string Entrance { get; set; } = "";
     public int EntranceDelayMs { get; set; }
     public int EntranceMs { get; set; } = EntranceEffects.DefaultDurationMs;
+    public string Motion { get; set; } = "";
     public string OscAddress { get; set; } = "";
     public List<Interaction> Interactions { get; set; } = new();
 

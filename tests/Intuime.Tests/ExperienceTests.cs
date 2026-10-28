@@ -832,6 +832,39 @@ public class ExperienceTests
     }
 
     [Fact]
+    public void Living_motion_loops_and_round_trips()
+    {
+        Assert.Equal(LivingEffects.Pose.Still, LivingEffects.At("missing", 1, 1));
+        var still = LivingEffects.At("Breathe", 0, 1);
+        Assert.Equal(1, still.Scale);
+        var grown = LivingEffects.At("Breathe", LivingEffects.PeriodSeconds("Breathe") / 4, 1);
+        Assert.True(grown.Scale > 1.06);
+        var hop = LivingEffects.At("Bounce", LivingEffects.PeriodSeconds("Bounce") / 4, 1);
+        Assert.True(hop.ShiftY < -20);
+        Assert.True(hop.ScaleY < 1);
+        var tilt = LivingEffects.At("Tilt", LivingEffects.PeriodSeconds("Tilt") / 4, 2);
+        Assert.True(tilt.ScaleX > 1.2);
+        Assert.True(Math.Abs(tilt.Rotation) > 10);
+        var wave = LivingEffects.At("Wave", LivingEffects.PeriodSeconds("Wave") / 2, 1);
+        Assert.Equal(0.5, wave.Wave, 3);
+        Assert.True(LivingEffects.HighlightScale(0.35) > 1.08);
+
+        var button = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);
+        button.Motion = "Float";
+        button.TapStrength = 1.4;
+        var document = new ExperienceDocument
+        {
+            StartSceneId = "room",
+            Scenes = { new Scene { Id = "room", Elements = { button } } }
+        };
+        var loaded = ProjectStore.Deserialize(ProjectStore.Serialize(document));
+        Assert.Equal("Float", loaded.Scenes[0].Elements[0].Motion);
+        Assert.Equal(1.4, loaded.Scenes[0].Elements[0].TapStrength);
+        var quiet = ProjectStore.Deserialize("{\"scenes\":[{\"id\":\"room\",\"elements\":[{\"id\":\"a\",\"kind\":\"text\"}]}],\"startSceneId\":\"room\"}");
+        Assert.Equal("", quiet.Scenes[0].Elements[0].Motion);
+    }
+
+    [Fact]
     public void Each_screen_keeps_its_own_scene_and_its_own_start()
     {
         var go = ElementFactory.Create(ElementKind.Button, 0, 0, 0, 1);

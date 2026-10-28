@@ -40,6 +40,8 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
     private readonly Dictionary<string, Bitmap> _bitmaps = new();
     private readonly DispatcherTimer _clocks;
     private readonly DispatcherTimer _preview;
+    private readonly DispatcherTimer _living;
+    private readonly System.Diagnostics.Stopwatch _motionClock = System.Diagnostics.Stopwatch.StartNew();
     private string? _previewId;
     private string _previewName = "";
     private bool _previewEntrance;
@@ -85,6 +87,9 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         _clocks.Start();
         _preview = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
         _preview.Tick += (_, _) => AdvancePreview();
+        _living = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(32) };
+        _living.Tick += (_, _) => AdvanceLiving();
+        _living.Start();
     }
 
     public void PreviewTap(string elementId, string effectName)
@@ -465,14 +470,16 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         _scrollRing.CornerRadius = new CornerRadius(Math.Max(12, element.CornerRadius + 4));
         Canvas.SetLeft(_scrollRing, element.X - _originX - pad);
         Canvas.SetTop(_scrollRing, element.Y - _originY - pad);
-        var scaleX = Math.Max(0.01, element.EffectScale * element.EffectScaleX);
-        var scaleY = Math.Max(0.01, element.EffectScale * element.EffectScaleY);
+        ComposeMotion(element, highlight: true, out var scaleX, out var scaleY, out var rotation, out var shiftX, out var shiftY);
         var motion = new TransformGroup();
         motion.Children.Add(new ScaleTransform(scaleX, scaleY));
-        motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
-        motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
+        motion.Children.Add(new RotateTransform(rotation));
+        motion.Children.Add(new TranslateTransform(shiftX, shiftY));
         _scrollRing.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
         _scrollRing.RenderTransform = motion;
+        var pulse = 0.5 + 0.5 * Math.Sin(_motionClock.Elapsed.TotalSeconds * Math.Tau / 1.4);
+        _scrollRing.Opacity = 0.72 + 0.28 * pulse;
+        _scrollRing.BorderThickness = new Thickness(5 + 3 * pulse);
         _scrollRing.IsVisible = true;
     }
 
@@ -495,8 +502,10 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         };
         var node = new Node { Root = root };
         _nodes[element.Id] = node;
-        ApplyGeometry(node, element);
+        node.Wave = new WaveBorder { IsHitTestVisible = false, IsVisible = false };
         root.Children.Add(CreateBody(node, element));
+        root.Children.Add(node.Wave);
+        ApplyGeometry(node, element);
         if (_design && _session?.Selection.Any(item => item.Id == element.Id) == true)
             AddAdorner(root, element);
         root.ContextMenu = _design ? MenuFor(element) : null;
@@ -1082,18 +1091,58 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         Dispatcher.UIThread.Post(() => box.Focus());
     }
 
+    private void AdvanceLiving()
+    {
+        if (_inline || _gesture != null)
+            return;
+        var scene = Scene();
+        if (scene == null)
+            return;
+        var highlightId = _design ? null : _engine?.ScrollTargetId;
+        foreach (var element in scene.Elements)
+        {
+            if (!LivingEffects.Known(element.Motion) && element.Id != highlightId)
+                continue;
+            if (_nodes.TryGetValue(element.Id, out var node))
+                ApplyGeometry(node, element);
+        }
+        if (highlightId != null)
+            PlaceScrollRing();
+    }
+
+    private void ComposeMotion(SceneElement element, bool highlight, out double scaleX, out double scaleY, out double rotation, out double shiftX, out double shiftY)
+    {
+        var seconds = _motionClock.Elapsed.TotalSeconds;
+        var pose = LivingEffects.At(element.Motion, seconds, TapEffects.Strength(element));
+        var grow = highlight && !_design && _engine?.ScrollTargetId == element.Id
+            ? LivingEffects.HighlightScale(seconds)
+            : 1;
+        scaleX = Math.Max(0.01, element.EffectScale * element.EffectScaleX * pose.Scale * pose.ScaleX * grow);
+        scaleY = Math.Max(0.01, element.EffectScale * element.EffectScaleY * pose.Scale * pose.ScaleY * grow);
+        rotation = element.Rotation + element.EffectRotation + pose.Rotation;
+        shiftX = element.EffectShiftX + pose.ShiftX;
+        shiftY = element.EffectShiftY + pose.ShiftY;
+        if (element.Id != null && _nodes.TryGetValue(element.Id, out var node) && node.Wave != null)
+        {
+            node.Wave.IsVisible = LivingEffects.IsWave(element.Motion);
+            node.Wave.Phase = pose.Wave;
+            node.Wave.Radius = Math.Max(0, element.CornerRadius);
+            if (node.Wave.IsVisible)
+                node.Wave.InvalidateVisual();
+        }
+    }
+
     private void ApplyGeometry(Node node, SceneElement element)
     {
         Canvas.SetLeft(node.Root, element.X - _originX);
         Canvas.SetTop(node.Root, element.Y - _originY);
         node.Root.Width = Math.Max(8, element.Width);
         node.Root.Height = Math.Max(8, element.Height);
-        var scaleX = Math.Max(0.01, element.EffectScale * element.EffectScaleX);
-        var scaleY = Math.Max(0.01, element.EffectScale * element.EffectScaleY);
+        ComposeMotion(element, highlight: true, out var scaleX, out var scaleY, out var rotation, out var shiftX, out var shiftY);
         var motion = new TransformGroup();
         motion.Children.Add(new ScaleTransform(scaleX, scaleY));
-        motion.Children.Add(new RotateTransform(element.Rotation + element.EffectRotation));
-        motion.Children.Add(new TranslateTransform(element.EffectShiftX, element.EffectShiftY));
+        motion.Children.Add(new RotateTransform(rotation));
+        motion.Children.Add(new TranslateTransform(shiftX, shiftY));
         node.Root.RenderTransformOrigin = new RelativePoint(0.5, 0.5, RelativeUnit.Relative);
         node.Root.RenderTransform = motion;
         var hidden = !element.IsVisible;
@@ -1226,9 +1275,28 @@ public sealed class SceneSurface : UserControl, ICustomHitTest
         public TextBlock? PrimaryText { get; set; }
         public TextBlock? SecondaryText { get; set; }
         public Image? Picture { get; set; }
+        public WaveBorder? Wave { get; set; }
         public string ImagePath { get; set; } = "";
         public string Signature { get; set; } = "";
         public Action? RefreshText { get; set; }
+    }
+
+    private sealed class WaveBorder : Control
+    {
+        public double Phase { get; set; }
+        public double Radius { get; set; }
+
+        public override void Render(DrawingContext context)
+        {
+            var rect = new Rect(3, 3, Math.Max(0, Bounds.Width - 6), Math.Max(0, Bounds.Height - 6));
+            if (rect.Width < 8 || rect.Height < 8)
+                return;
+            var radius = Math.Clamp(Radius, 0, Math.Min(rect.Width, rect.Height) / 2);
+            var track = new Pen(new SolidColorBrush(Color.Parse("#99F4F7FB")), 4);
+            var dash = new Pen(new SolidColorBrush(Color.Parse("#FFFFFF")), 6, new DashStyle(new double[] { 16, 20 }, Phase * 36), PenLineCap.Round);
+            context.DrawRectangle(null, track, rect, radius, radius);
+            context.DrawRectangle(null, dash, rect, radius, radius);
+        }
     }
 
     private enum GestureKind { Move, Resize, Marquee, Background }
