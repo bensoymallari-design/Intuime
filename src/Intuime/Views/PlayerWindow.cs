@@ -43,6 +43,10 @@ public sealed class PlayerWindow : Window
     private string? _returnSceneId;
     private SiteWindow? _site;
     private Window? _sceneBack;
+    private Window? _ownControls;
+    private SceneSurface? _ownSurface;
+    private readonly ScaleTransform _ownScale = new(1, 1);
+    private bool _ownRegionReady;
     private bool _closingSite;
     private readonly SceneSurface _pageButtons = new();
     private readonly LayoutTransformControl _pageButtonsHost = new()
@@ -179,14 +183,8 @@ public sealed class PlayerWindow : Window
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _timer.Tick += (_, _) =>
         {
-            if (_site != null && _sceneBack != null)
-            {
-                var bounds = SiteBounds();
-                _sceneBack.Position = new PixelPoint(bounds.X + 24, bounds.Y + 24);
-                _sceneBack.Topmost = true;
-                var handle = _sceneBack.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
-                LinuxWebFrame.KeepAbove(handle);
-            }
+            if (_site != null)
+                PlaceSiteChrome();
             if (_ownsClock)
                 _engine.Tick();
             _fade = Math.Min(1, _fade + 0.1);
@@ -231,6 +229,7 @@ public sealed class PlayerWindow : Window
             _timer.Stop();
             CloseSite(goBack: false);
             _sceneBack?.Close();
+            _ownControls?.Close();
             _osc?.Dispose();
             if (_buttonsWindow != null)
                 _buttonsWindow.Close();
@@ -1062,14 +1061,148 @@ public sealed class PlayerWindow : Window
         ShowSceneBack();
     }
 
-    private void ShowSceneBack()
+    private void ShowSceneBack() => PlaceSiteChrome();
+
+    private void PlaceSiteChrome()
     {
+        if (SiteControls.HasOwn(Shown))
+        {
+            if (_sceneBack?.IsVisible == true)
+                _sceneBack.Hide();
+            PlaceOwnControls();
+            return;
+        }
+
+        if (_ownControls?.IsVisible == true)
+            _ownControls.Hide();
+        _ownRegionReady = false;
         _sceneBack ??= BuildSceneBack();
         var bounds = SiteBounds();
-        _sceneBack.Position = new PixelPoint(bounds.X + 24, bounds.Y + 24);
+        _sceneBack.Position = new PixelPoint(bounds.X + 20, bounds.Y + 68);
         _sceneBack.Topmost = true;
         if (!_sceneBack.IsVisible)
             _sceneBack.Show();
+        KeepAbove(_sceneBack);
+    }
+
+    private void PlaceOwnControls()
+    {
+        EnsureOwnControls();
+        if (!SceneFrame(out var origin, out var dipW, out var dipH, out var scale))
+            return;
+        var sceneW = Math.Max(1, _engine.Live.Width);
+        var sceneH = Math.Max(1, _engine.Live.Height);
+        _ownScale.ScaleX = scale;
+        _ownScale.ScaleY = scale;
+        _ownSurface!.UseOverlay(0, 0, sceneW, sceneH, SiteControls.IsOwn);
+        _ownSurface.Width = sceneW;
+        _ownSurface.Height = sceneH;
+        _ownControls!.Position = origin;
+        _ownControls.Width = dipW;
+        _ownControls.Height = dipH;
+        _ownControls.Topmost = true;
+        if (!_ownControls.IsVisible)
+        {
+            _ownRegionReady = false;
+            _ownSurface.Rebuild();
+            _ownControls.Show();
+        }
+        if (!_ownRegionReady)
+            _ownRegionReady = TryClipOwnControls(scale);
+        KeepAbove(_ownControls);
+    }
+
+    private void EnsureOwnControls()
+    {
+        if (_ownControls != null)
+            return;
+        _ownSurface = new SceneSurface();
+        _ownSurface.UsePlayback(_engine, _assetRoot);
+        _ownSurface.UseScreen(_screen);
+        _ownSurface.PassClicksThrough();
+        var host = new LayoutTransformControl
+        {
+            LayoutTransform = _ownScale,
+            Child = _ownSurface,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        _ownControls = new Window
+        {
+            Title = "Scene controls",
+            SystemDecorations = SystemDecorations.None,
+            ShowInTaskbar = false,
+            CanResize = false,
+            Topmost = true,
+            Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
+            WindowStartupLocation = WindowStartupLocation.Manual,
+            ShowActivated = false,
+            Content = host
+        };
+        _ownControls.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape)
+                return;
+            ReturnFromSite();
+            e.Handled = true;
+        };
+    }
+
+    private bool TryClipOwnControls(double scale)
+    {
+        var window = _ownControls;
+        var scene = Shown;
+        if (window == null || scene == null)
+            return false;
+        var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        if (handle == IntPtr.Zero)
+            return false;
+        var device = DeviceScale();
+        var pad = (int)Math.Round(48 * scale * device);
+        var rects = new List<(int X, int Y, int Width, int Height)>();
+        foreach (var element in scene.Elements)
+        {
+            if (!SiteControls.IsOwn(element))
+                continue;
+            var x = (int)Math.Round((element.X + element.EffectShiftX) * scale * device) - pad;
+            var y = (int)Math.Round((element.Y + element.EffectShiftY) * scale * device) - pad;
+            var width = (int)Math.Round(element.Width * Math.Max(element.EffectScale, 0.2) * scale * device) + pad * 2;
+            var height = (int)Math.Round(element.Height * Math.Max(element.EffectScale, 0.2) * scale * device) + pad * 2;
+            rects.Add((Math.Max(0, x), Math.Max(0, y), Math.Max(1, width), Math.Max(1, height)));
+        }
+        if (rects.Count == 0)
+            return false;
+        SiteWindow.ClipTo(handle, rects);
+        return true;
+    }
+
+    private bool SceneFrame(out PixelPoint origin, out double dipW, out double dipH, out double scale)
+    {
+        scale = _scale.ScaleX <= 0 ? 1 : _scale.ScaleX;
+        var sceneW = Math.Max(1, _engine.Live.Width);
+        var sceneH = Math.Max(1, _engine.Live.Height);
+        dipW = sceneW * scale;
+        dipH = sceneH * scale;
+        var sceneX = Math.Max(0, (Bounds.Width - dipW) / 2);
+        var sceneY = Math.Max(0, (Bounds.Height - dipH) / 2);
+        origin = this.PointToScreen(new Point(sceneX, sceneY));
+        return dipW > 1 && dipH > 1 && Bounds.Width > 1;
+    }
+
+    private double DeviceScale()
+    {
+        var scaling = _monitor?.Scaling ?? Screens?.ScreenFromVisual(this)?.Scaling ?? 1;
+        return scaling <= 0 ? 1 : scaling;
+    }
+
+    private static void KeepAbove(Window? window)
+    {
+        if (window == null || !window.IsVisible)
+            return;
+        window.Topmost = true;
+        var handle = window.TryGetPlatformHandle()?.Handle ?? IntPtr.Zero;
+        LinuxWebFrame.KeepAbove(handle);
     }
 
     private Window BuildSceneBack()
@@ -1077,31 +1210,45 @@ public sealed class PlayerWindow : Window
         var window = new Window
         {
             Title = "Back",
-            Width = 148,
-            Height = 56,
+            Width = 96,
+            Height = 96,
             CanResize = false,
             SystemDecorations = SystemDecorations.None,
             ShowInTaskbar = false,
             Topmost = true,
             Background = Brushes.Transparent,
+            TransparencyLevelHint = new[] { WindowTransparencyLevel.Transparent },
             WindowStartupLocation = WindowStartupLocation.Manual,
             ShowActivated = false
         };
-        var button = new Button
+        var halo = new IconFace
         {
-            Content = "Back",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center,
-            Background = Painting.Brush("#E7A23A"),
-            Foreground = Painting.Brush("#1B2330"),
-            FontSize = 20,
-            FontWeight = FontWeight.SemiBold,
-            CornerRadius = new CornerRadius(16)
+            Width = 78,
+            Height = 78,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
         };
-        button.Click += (_, _) => ReturnFromSite();
-        window.Content = button;
+        halo.Set("arrows/back", "#FFFFFF");
+        var arrow = new IconFace
+        {
+            Width = 62,
+            Height = 62,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
+        };
+        arrow.Set("arrows/back", "#141414");
+        window.Content = new Grid
+        {
+            Background = Brushes.Transparent,
+            Children = { halo, arrow }
+        };
+        window.PointerPressed += (_, e) =>
+        {
+            ReturnFromSite();
+            e.Handled = true;
+        };
         window.KeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape)
@@ -1146,6 +1293,9 @@ public sealed class PlayerWindow : Window
             }
             if (_sceneBack?.IsVisible == true)
                 _sceneBack.Hide();
+            if (_ownControls?.IsVisible == true)
+                _ownControls.Hide();
+            _ownRegionReady = false;
             if (!goBack || string.IsNullOrEmpty(back) || _engine.SceneFor(_screen)?.Id == back)
                 return;
             _engine.RunExternal(new ExperienceAction { Kind = ActionKind.GoToScene, TargetId = back });
