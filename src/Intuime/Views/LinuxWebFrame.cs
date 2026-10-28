@@ -93,16 +93,15 @@ static class LinuxWebFrame
             return;
         // A kiosk page is fullscreen, which sits above a normal topmost window.
         // Override-redirect leaves the window manager out so the arrow stays on top.
+        // The first change unmaps the window, so every later tick maps it again.
         if (Redirected.Add(window))
         {
             var attributes = new byte[112];
             attributes[88] = 1;
             XChangeWindowAttributes(display, window, 512, attributes);
             XUnmapWindow(display, window);
-            XMapRaised(display, window);
         }
-        else
-            XRaiseWindow(display, window);
+        XMapRaised(display, window);
         XFlush(display);
     }
 
