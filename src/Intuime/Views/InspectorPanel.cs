@@ -177,7 +177,7 @@ public sealed class InspectorPanel : StackPanel
         if (element.Kind == ElementKind.WebLink)
         {
             Text("URL", element.Url, value => element.Url = value);
-            Note("In Play, this page stays inside Intuime and fills the scene behind your other buttons. A Back button, or any other button, still opens the scene you chose. There is no close, minimize, or maximize button.");
+            Note("In Play, tapping this opens the site in its own window. A Back button stays in the corner. Press it to close the site and return to this scene.");
         }
         if (element.Kind == ElementKind.Clock)
             Text("Format", element.ClockFormat, value => element.ClockFormat = value);
@@ -326,7 +326,7 @@ public sealed class InspectorPanel : StackPanel
     {
         scene.PullLegacyBackground();
         Heading("Backgrounds");
-        Note("Add a picture, a video, a web link, or a built-in motion background. A link opens that site in Play and fills its layer, with your buttons still in front. Built-in designs stay sharp at the experience size and repeat without a jump. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it.");
+        Note("Add a picture, a video, a web link, or a built-in motion background. A link opens that site in its own window when the scene starts. A Back button stays in the corner and returns to the scene you came from. Built-in designs stay sharp at the experience size and repeat without a jump. Layers stack. Layer 1 is the back. Behind and In front swap a layer with its neighbor. A PNG with an empty background shows the layer behind it.");
         var fourK = new Button { Content = "Make the experience 4K", Classes = { "tool" }, HorizontalAlignment = HorizontalAlignment.Left };
         fourK.Click += (_, _) =>
         {
@@ -416,7 +416,7 @@ public sealed class InspectorPanel : StackPanel
                 card.Children.Add(LayerText("Web address", layer.Source, value => layer.Source = value.Trim()));
                 card.Children.Add(new TextBlock
                 {
-                    Text = "In Play this address opens by itself and fills this layer. It stays inside Intuime. Buttons on the scene stay on top. There is no close, minimize, or maximize button.",
+                    Text = "In Play this address opens by itself in a window. A Back button stays in the corner. Press Back to close the site and return to the scene you came from.",
                     TextWrapping = TextWrapping.Wrap,
                     Foreground = Painting.Brush(Painting.Muted),
                     FontSize = 12
@@ -748,7 +748,7 @@ public sealed class InspectorPanel : StackPanel
             panel.Children.Add(TextControl("URL", action.Text, value => action.Text = value));
             panel.Children.Add(new TextBlock
             {
-                Text = "This opens inside the kiosk and fills the scene behind your other buttons. Those buttons can still open another scene. There is no close or minimize button.",
+                Text = "This opens the site in a window. A Back button stays in the corner. Press it to close the site and return to the scene you came from.",
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = Painting.Brush(Painting.Muted),
                 FontSize = 12
